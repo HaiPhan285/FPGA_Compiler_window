@@ -1,0 +1,4 @@
+.toolchain/
+build/
+toolchain.local.json
+tools/xc7a100t.bin
