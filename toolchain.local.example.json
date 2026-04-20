@@ -1,0 +1,37 @@
+{
+  "autoDownload": true,
+  "ossCadSuite": {
+    "root": ".toolchain\\oss-cad-suite"
+  },
+  "toolchainBundle": {
+    "root": ".toolchain\\openxc7-bundle",
+    "downloadUrl": "",
+    "archiveName": "openxc7-bundle.zip",
+    "nextpnrExe": "nextpnr-xilinx.exe",
+    "prjxrayRoot": "src\\prjxray",
+    "prjxrayDbRoot": "src\\prjxray-db\\artix7",
+    "xc7frames2bitExe": "build\\prjxray\\tools\\xc7frames2bit.exe",
+    "pathExtras": [
+      "bin",
+      "msys64\\ucrt64\\bin",
+      "msys64\\usr\\bin"
+    ]
+  },
+  "nextpnrXilinx": {
+    "exePath": ""
+  },
+  "projectXray": {
+    "root": "",
+    "utilsPath": "",
+    "fasmPath": "",
+    "dbRoot": "",
+    "xc7frames2bitExe": ""
+  },
+  "pythonExe": "",
+  "chipdbPath": "tools\\xc7a100t.bin",
+  "part": "xc7a100tcsg324-1",
+  "openFpgaLoader": {
+    "cable": "digilent",
+    "board": "nexys_a7_100"
+  }
+}
