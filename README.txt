@@ -95,8 +95,9 @@ notepad .\toolchain.local.json
    - point `toolchain.local.json` at your existing installs
    - set `toolchainBundle.downloadUrl` in `toolchain.local.json` to a zip file that contains your prepacked `nextpnr-xilinx` and Project X-Ray tools
 
-7. Keep the chip database file in this repository at:
+7. Keep the chip database file available locally at:
    - `tools\xc7a100t.bin`
+   - this file is larger than GitHub's normal 100 MB file limit, so it is not included in the GitHub repository by default
 
 8. If you want to program with `openFPGALoader` on native Windows, install the correct USB driver with Zadig.
    Usually:
