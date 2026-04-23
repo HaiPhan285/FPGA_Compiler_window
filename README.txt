@@ -83,9 +83,11 @@ notepad .\toolchain.local.json
 
 4. What setup does automatically:
    - reuses an existing OSS CAD Suite install if found
-   - otherwise downloads the latest Windows OSS CAD Suite release into `.toolchain\oss-cad-suite`
+   - otherwise downloads the latest Windows OSS CAD Suite release into `.toolchain\downloads`
    - reuses existing local `nextpnr-xilinx`, Project X-Ray, and `xc7frames2bit` installs if found
    - writes `.toolchain\env.bat` for build and program commands
+
+   Note: recent OSS CAD Suite Windows releases are published as `oss-cad-suite-windows-x64-<date>.exe` self-extracting installers instead of zip archives. If setup asks you to install one manually, run the downloaded `.exe`, then point `ossCadSuite.root` in `toolchain.local.json` at the extracted `oss-cad-suite` folder and rerun setup.
 
 5. What setup cannot infer by itself:
    - a Windows `nextpnr-xilinx` binary if you do not already have one
