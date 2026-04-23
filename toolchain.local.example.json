@@ -1,10 +1,11 @@
 {
   "autoDownload": true,
+  "sharedToolchainRoot": "%LOCALAPPDATA%\\fpga-tools-cache",
   "ossCadSuite": {
-    "root": ".toolchain\\oss-cad-suite"
+    "root": ""
   },
   "toolchainBundle": {
-    "root": ".toolchain\\openxc7-bundle",
+    "root": "",
     "downloadUrl": "",
     "archiveName": "openxc7-bundle.zip",
     "nextpnrExe": "nextpnr-xilinx.exe",
