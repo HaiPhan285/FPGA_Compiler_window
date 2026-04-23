@@ -93,18 +93,60 @@ function Expand-ZipArchive {
 
 function Get-LatestOssCadSuiteAsset {
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/YosysHQ/oss-cad-suite-build/releases/latest"
-    $asset = $release.assets |
-        Where-Object { $_.name -like "*windows-x64*" -and $_.name -like "*.zip" } |
-        Select-Object -First 1
+    $windowsAssets = @($release.assets | Where-Object { $_.name -like "*windows-x64*" })
+    $asset = @(
+        $windowsAssets | Where-Object { $_.name -like "*.zip" }
+        $windowsAssets | Where-Object { $_.name -like "*.exe" }
+    ) | Select-Object -First 1
 
     if (-not $asset) {
-        throw "Could not find a Windows zip asset in the latest OSS CAD Suite release."
+        $availableAssets = @($release.assets | ForEach-Object { $_.name })
+        $availableMessage = if ($availableAssets.Count -gt 0) {
+            " Available assets: " + ($availableAssets -join ", ")
+        } else {
+            ""
+        }
+
+        throw "Could not find a supported Windows OSS CAD Suite asset in release $($release.tag_name). Expected a windows-x64 .zip or .exe.$availableMessage"
     }
 
     return [pscustomobject]@{
         Name = $asset.name
         Url = $asset.browser_download_url
         Tag = $release.tag_name
+        Extension = [System.IO.Path]::GetExtension($asset.name).ToLowerInvariant()
+    }
+}
+
+function Install-OssCadSuiteAsset {
+    param(
+        $Asset,
+        [string]$ArchivePath
+    )
+
+    switch ($Asset.Extension) {
+        ".zip" {
+            Expand-ZipArchive -ArchivePath $ArchivePath -Destination $stateDir
+            return
+        }
+
+        ".exe" {
+            throw @"
+Latest OSS CAD Suite Windows releases are published as self-extracting installers ($($Asset.Name)), not zip archives.
+
+Automatic extraction is not implemented in this setup script yet.
+
+Manual workaround:
+  1. Run $ArchivePath to extract the oss-cad-suite folder to a location without spaces.
+  2. Copy toolchain.local.example.json to toolchain.local.json if needed.
+  3. Set ossCadSuite.root to the extracted oss-cad-suite folder.
+  4. Re-run .\fpga.bat setup
+"@
+        }
+
+        default {
+            throw "Unsupported OSS CAD Suite asset type '$($Asset.Extension)' for $($Asset.Name)"
+        }
     }
 }
 
@@ -139,7 +181,7 @@ function Ensure-OssCadSuite {
     }
 
     Invoke-DownloadFile -Url $asset.Url -Destination $archivePath
-    Expand-ZipArchive -ArchivePath $archivePath -Destination $stateDir
+    Install-OssCadSuiteAsset -Asset $asset -ArchivePath $archivePath
 
     if (-not (Test-Path -LiteralPath (Join-Path $managedOssCadRoot "environment.bat"))) {
         throw "OSS CAD Suite was downloaded, but environment.bat was not found under $managedOssCadRoot"
@@ -201,6 +243,20 @@ function Resolve-RelativeToRoot {
     }
 
     return [System.IO.Path]::GetFullPath((Join-Path $BasePath $RelativePath))
+}
+
+function Test-PythonModule {
+    param(
+        [string]$PythonPath,
+        [string]$ModuleName
+    )
+
+    if (-not $PythonPath -or -not (Test-Path -LiteralPath $PythonPath)) {
+        return $false
+    }
+
+    & $PythonPath -c "import $ModuleName" *> $null
+    return ($LASTEXITCODE -eq 0)
 }
 
 function Get-PathList {
@@ -292,11 +348,23 @@ $chipdb = Resolve-FirstExistingPath @(
     (Join-Path $root "tools\xc7a100t.bin")
 )
 
-$pythonExe = Resolve-FirstExistingPath @(
-    (Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("pythonExe"))),
-    (Join-Path $ossCadRoot "lib\python3.exe"),
-    (Join-Path $legacyFpgaTools "pyenv\bin\python.exe")
+$configuredPythonExe = Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("pythonExe"))
+$pythonCandidates = @(
+    $configuredPythonExe,
+    (Join-Path $legacyFpgaTools "pyenv\bin\python.exe"),
+    (Join-Path $ossCadRoot "lib\python3.exe")
 )
+$pythonExe = $null
+foreach ($candidate in $pythonCandidates) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate) -and (Test-PythonModule -PythonPath $candidate -ModuleName "textx")) {
+        $pythonExe = [System.IO.Path]::GetFullPath($candidate)
+        break
+    }
+}
+
+if (-not $pythonExe) {
+    $pythonExe = Resolve-FirstExistingPath $pythonCandidates
+}
 
 $xc7frames2bitExe = Resolve-FirstExistingPath @(
     (Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("projectXray", "xc7frames2bitExe"))),
@@ -306,11 +374,13 @@ $xc7frames2bitExe = Resolve-FirstExistingPath @(
 
 $extraPaths = New-Object System.Collections.Generic.List[string]
 foreach ($pathEntry in @(
-    (Join-Path $ossCadRoot "bin"),
-    (Join-Path $ossCadRoot "lib"),
-    (Join-Path $legacyFpgaTools "bin"),
+    # nextpnr-xilinx-patched.exe is linked against the MSYS2/UCRT runtime.
+    # Keep those DLLs ahead of oss-cad-suite\lib to avoid loader entry-point mismatches.
     (Join-Path $legacyFpgaTools "msys64\ucrt64\bin"),
-    (Join-Path $legacyFpgaTools "msys64\usr\bin")
+    (Join-Path $legacyFpgaTools "msys64\usr\bin"),
+    (Join-Path $legacyFpgaTools "bin"),
+    (Join-Path $ossCadRoot "bin"),
+    (Join-Path $ossCadRoot "lib")
 )) {
     if ($pathEntry -and (Test-Path -LiteralPath $pathEntry) -and -not $extraPaths.Contains($pathEntry)) {
         $extraPaths.Add($pathEntry)
