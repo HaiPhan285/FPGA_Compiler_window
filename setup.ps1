@@ -7,11 +7,9 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $stateDir = Join-Path $root ".toolchain"
-$downloadsDir = Join-Path $stateDir "downloads"
-$managedOssCadRoot = Join-Path $stateDir "oss-cad-suite"
-$managedBundleRoot = Join-Path $stateDir "openxc7-bundle"
 $envFile = Join-Path $stateDir "env.bat"
 $configPath = Join-Path $root "toolchain.local.json"
+$defaultSharedToolchainRoot = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "fpga-tools-cache"
 $legacyFpgaTools = "C:\Users\27mik\AppData\Local\fpga-tools"
 $legacyOssCadRoot = "C:\fpga-tools\oss-cad-suite"
 $legacyNextpnrExe = "C:\Users\27mik\nextpnr-xilinx-patched.exe"
@@ -55,11 +53,12 @@ function Resolve-WorkspacePath {
         return $null
     }
 
-    if ([System.IO.Path]::IsPathRooted($PathValue)) {
-        return [System.IO.Path]::GetFullPath($PathValue)
+    $expandedPath = [Environment]::ExpandEnvironmentVariables($PathValue.Trim())
+    if ([System.IO.Path]::IsPathRooted($expandedPath)) {
+        return [System.IO.Path]::GetFullPath($expandedPath)
     }
 
-    return [System.IO.Path]::GetFullPath((Join-Path $root $PathValue))
+    return [System.IO.Path]::GetFullPath((Join-Path $root $expandedPath))
 }
 
 function Ensure-Directory {
@@ -73,12 +72,35 @@ function Ensure-Directory {
 function Invoke-DownloadFile {
     param(
         [string]$Url,
-        [string]$Destination
+        [string]$Destination,
+        [switch]$ReuseExisting
     )
 
     Ensure-Directory -PathValue (Split-Path -Parent $Destination)
+    if ($ReuseExisting -and (Test-Path -LiteralPath $Destination)) {
+        Write-Host "Using cached download $Destination"
+        return
+    }
+
     Write-Host "Downloading $Url"
     Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing
+}
+
+function Get-NewestMatchingFile {
+    param(
+        [string]$Directory,
+        [string[]]$Patterns
+    )
+
+    if (-not (Test-Path -LiteralPath $Directory)) {
+        return $null
+    }
+
+    $matches = foreach ($pattern in $Patterns) {
+        Get-ChildItem -LiteralPath $Directory -File -Filter $pattern -ErrorAction SilentlyContinue
+    }
+
+    return @($matches | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)[0]
 }
 
 function Expand-ZipArchive {
@@ -172,15 +194,37 @@ function Ensure-OssCadSuite {
         return $configuredRoot
     }
 
-    $asset = Get-LatestOssCadSuiteAsset
-    $archivePath = Join-Path $downloadsDir $asset.Name
+    $cachedArchive = if (-not $Force) {
+        Get-NewestMatchingFile -Directory $downloadsDir -Patterns @(
+            "oss-cad-suite-windows-x64-*.zip",
+            "oss-cad-suite-windows-x64-*.exe"
+        )
+    } else {
+        $null
+    }
+
+    if ($cachedArchive) {
+        $asset = [pscustomobject]@{
+            Name = $cachedArchive.Name
+            Url = $null
+            Tag = "cached"
+            Extension = $cachedArchive.Extension.ToLowerInvariant()
+        }
+        $archivePath = $cachedArchive.FullName
+        Write-Host "Using cached OSS CAD Suite archive $($cachedArchive.Name)"
+    } else {
+        $asset = Get-LatestOssCadSuiteAsset
+        $archivePath = Join-Path $downloadsDir $asset.Name
+    }
 
     Write-Host "Installing OSS CAD Suite $($asset.Tag) into $managedOssCadRoot"
     if (Test-Path -LiteralPath $managedOssCadRoot) {
         Remove-Item -LiteralPath $managedOssCadRoot -Recurse -Force
     }
 
-    Invoke-DownloadFile -Url $asset.Url -Destination $archivePath
+    if ($asset.Url) {
+        Invoke-DownloadFile -Url $asset.Url -Destination $archivePath -ReuseExisting:(-not $Force)
+    }
     Install-OssCadSuiteAsset -Asset $asset -ArchivePath $archivePath
 
     if (-not (Test-Path -LiteralPath (Join-Path $managedOssCadRoot "environment.bat"))) {
@@ -214,7 +258,7 @@ function Ensure-OptionalBundle {
     }
 
     Ensure-Directory -PathValue $bundleRoot
-    Invoke-DownloadFile -Url $downloadUrl -Destination $archivePath
+    Invoke-DownloadFile -Url $downloadUrl -Destination $archivePath -ReuseExisting:(-not $Force)
     Expand-ZipArchive -ArchivePath $archivePath -Destination $bundleRoot
 
     return $bundleRoot
@@ -300,6 +344,11 @@ $config = $null
 if (Test-Path -LiteralPath $configPath) {
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
 }
+
+$toolchainStoreRoot = Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("sharedToolchainRoot") -Default $defaultSharedToolchainRoot)
+$downloadsDir = Join-Path $toolchainStoreRoot "downloads"
+$managedOssCadRoot = Join-Path $toolchainStoreRoot "oss-cad-suite"
+$managedBundleRoot = Join-Path $toolchainStoreRoot "openxc7-bundle"
 
 $ossCadRoot = Ensure-OssCadSuite -Config $config
 $bundleRoot = Ensure-OptionalBundle -Config $config
@@ -455,6 +504,7 @@ Write-EnvFile -FilePath $envFile -Values $envValues
 
 Write-Host ""
 Write-Host "Toolchain ready."
+Write-Host "  Cache root    : $toolchainStoreRoot"
 Write-Host "  OSS CAD Suite : $ossCadRoot"
 Write-Host "  Yosys         : $($envValues.YOSYS_EXE)"
 Write-Host "  nextpnr       : $nextpnrExe"

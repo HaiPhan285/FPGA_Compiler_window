@@ -24,7 +24,10 @@ echo Unknown command: %COMMAND%
 goto :usage
 
 :setup
-powershell -ExecutionPolicy Bypass -File "%SETUP_SCRIPT%" -Ensure
+set "SETUP_FORCE="
+if /I "%~1"=="--force" set "SETUP_FORCE=-Force"
+if /I "%~1"=="/force" set "SETUP_FORCE=-Force"
+powershell -ExecutionPolicy Bypass -File "%SETUP_SCRIPT%" -Ensure %SETUP_FORCE%
 exit /b %ERRORLEVEL%
 
 :ensure_toolchain
@@ -72,7 +75,7 @@ exit /b 0
 
 :usage
 echo Usage:
-echo   %~nx0 setup
+echo   %~nx0 setup [--force]
 echo   %~nx0 build ^<design.sv^> [top] [constraints.xdc]
 echo   %~nx0 program [build\design.bit]
 exit /b 1
