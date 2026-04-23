@@ -77,15 +77,22 @@ notepad .\toolchain.local.json
 3. Run setup:
 
 ```powershell
-# Reuse installed tools when present, otherwise download managed ones when configured.
+# Reuse installed tools when present. If a download is needed, it is cached once
+# under %LOCALAPPDATA%\fpga-tools-cache and reused by other FPGA projects.
 .\fpga.bat setup
+
+# Force a fresh download/install instead of reusing cached archives.
+.\fpga.bat setup --force
 ```
 
 4. What setup does automatically:
    - reuses an existing OSS CAD Suite install if found
-   - otherwise downloads the latest Windows OSS CAD Suite release into `.toolchain\downloads`
+   - otherwise reuses a cached installer from `%LOCALAPPDATA%\fpga-tools-cache\downloads` when available
+   - otherwise downloads the latest Windows OSS CAD Suite release into the shared cache
    - reuses existing local `nextpnr-xilinx`, Project X-Ray, and `xc7frames2bit` installs if found
-   - writes `.toolchain\env.bat` for build and program commands
+   - writes a small repo-local `.toolchain\env.bat` for build and program commands
+   - reuses a cached OpenXC7 bundle archive before downloading it again
+   - lets later repositories reuse the same cached toolchain instead of reinstalling everything
 
    Note: recent OSS CAD Suite Windows releases are published as `oss-cad-suite-windows-x64-<date>.exe` self-extracting installers instead of zip archives. If setup asks you to install one manually, run the downloaded `.exe`, then point `ossCadSuite.root` in `toolchain.local.json` at the extracted `oss-cad-suite` folder and rerun setup.
 
@@ -96,6 +103,7 @@ notepad .\toolchain.local.json
 6. If those tools are missing, use one of these:
    - point `toolchain.local.json` at your existing installs
    - set `toolchainBundle.downloadUrl` in `toolchain.local.json` to a zip file that contains your prepacked `nextpnr-xilinx` and Project X-Ray tools
+   - keep the default `sharedToolchainRoot` so one install can be reused by multiple projects
 
 7. Keep the chip database file available locally at:
    - `tools\xc7a100t.bin`
