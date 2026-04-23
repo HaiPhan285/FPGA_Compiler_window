@@ -148,7 +148,7 @@ function Install-OssCadSuiteAsset {
 
     switch ($Asset.Extension) {
         ".zip" {
-            Expand-ZipArchive -ArchivePath $ArchivePath -Destination $stateDir
+            Expand-ZipArchive -ArchivePath $ArchivePath -Destination $toolchainStoreRoot
             return
         }
 
