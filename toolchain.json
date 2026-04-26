@@ -16,7 +16,7 @@
       "msys64\\usr\\bin"
     ],
     "githubRelease": {
-      "repo": "HaiPhan285/FPGA_Compiler-",
+      "repo": "HaiPhan285/FPGA_Compiler_window",
       "tag": "latest",
       "assetPatterns": [
         "*toolchain*windows*.zip",
@@ -46,7 +46,7 @@
     "archiveName": "",
     "archiveSubPath": "tools\\xc7a100t.bin",
     "githubRelease": {
-      "repo": "HaiPhan285/FPGA_Compiler-",
+      "repo": "HaiPhan285/FPGA_Compiler_window",
       "tag": "latest",
       "assetPatterns": [
         "*xc7a100t*.bin",

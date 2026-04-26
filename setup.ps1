@@ -19,6 +19,15 @@ $githubApiHeaders = @{
     "User-Agent" = "nexys-a7-100t-toolchain-setup"
 }
 
+try {
+    $tls12 = [System.Net.SecurityProtocolType]::Tls12
+    $protocols = [System.Net.ServicePointManager]::SecurityProtocol
+    if (($protocols -band $tls12) -ne $tls12) {
+        [System.Net.ServicePointManager]::SecurityProtocol = $protocols -bor $tls12
+    }
+} catch {
+}
+
 function Get-ConfigValue {
     param(
         $Object,
@@ -445,6 +454,8 @@ function Get-GitHubReleaseAsset {
         return $null
     }
 
+    $Repository = $Repository.Trim()
+
     $patterns = @($AssetPatterns | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ($patterns.Count -eq 0) {
         return $null
@@ -456,7 +467,24 @@ function Get-GitHubReleaseAsset {
         "https://api.github.com/repos/$Repository/releases/tags/$Tag"
     }
 
-    $release = Invoke-RestMethod -Uri $releaseUri -Headers $githubApiHeaders
+    try {
+        $release = Invoke-RestMethod -Uri $releaseUri -Headers $githubApiHeaders
+    } catch {
+        $statusCode = $null
+        if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+            try {
+                $statusCode = [int]$_.Exception.Response.StatusCode
+            } catch {
+            }
+        }
+
+        if ($statusCode -eq 404) {
+            return $null
+        }
+
+        throw "GitHub $Purpose lookup failed for '$Repository' from $releaseUri. $($_.Exception.Message)"
+    }
+
     $assets = @($release.assets)
 
     foreach ($pattern in $patterns) {
@@ -507,4 +535,566 @@ function Get-NewestMatchingFile {
 function Expand-ZipArchive {
     param(
         [string]$ArchivePath,
-        [strin
+        [string]$Destination
+    )
+
+    Remove-DirectoryIfExists -PathValue $Destination
+    Ensure-Directory -PathValue $Destination
+    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $Destination -Force
+}
+
+function Resolve-FirstExistingPath {
+    param([string[]]$Candidates)
+
+    foreach ($candidate in $Candidates) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+
+    return $null
+}
+
+function Resolve-RelativeToRoot {
+    param(
+        [string]$BasePath,
+        [string]$RelativePath,
+        [switch]$Directory,
+        [switch]$File
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BasePath) -or [string]::IsNullOrWhiteSpace($RelativePath)) {
+        return $null
+    }
+
+    return Find-PathBySuffix -Root $BasePath -RelativePath $RelativePath -Directory:$Directory -File:$File
+}
+
+function Test-PythonModule {
+    param(
+        [string]$PythonPath,
+        [string]$ModuleName
+    )
+
+    if (-not $PythonPath -or -not (Test-Path -LiteralPath $PythonPath)) {
+        return $false
+    }
+
+    & $PythonPath -c "import $ModuleName" *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Get-PathList {
+    param(
+        $Config,
+        [string[]]$Path
+    )
+
+    $value = Get-ConfigValue -Object $Config -Path $Path
+    if ($null -eq $value) {
+        return @()
+    }
+
+    if ($value -is [System.Array]) {
+        return @($value)
+    }
+
+    return @($value)
+}
+
+function Write-EnvFile {
+    param(
+        [string]$FilePath,
+        [hashtable]$Values
+    )
+
+    Ensure-Directory -PathValue (Split-Path -Parent $FilePath)
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("@echo off")
+
+    foreach ($key in ($Values.Keys | Sort-Object)) {
+        $value = $Values[$key]
+        $lines.Add("set `"$key=$value`"")
+    }
+
+    $text = ($lines -join "`r`n") + "`r`n"
+    Set-Content -LiteralPath $FilePath -Value $text -Encoding ASCII
+}
+
+function Get-DownloadFileName {
+    param(
+        [string]$Url,
+        [string]$DefaultName
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($DefaultName)) {
+        return $DefaultName
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Url)) {
+        try {
+            $name = [System.IO.Path]::GetFileName(([System.Uri]$Url).AbsolutePath)
+            if (-not [string]::IsNullOrWhiteSpace($name)) {
+                return $name
+            }
+        } catch {
+        }
+    }
+
+    return "download.bin"
+}
+
+function Install-ChipDbAsset {
+    param(
+        [string]$SourcePath,
+        [string]$ArchiveSubPath,
+        [string]$DestinationPath
+    )
+
+    $extension = [System.IO.Path]::GetExtension($SourcePath).ToLowerInvariant()
+    switch ($extension) {
+        ".bin" {
+            Ensure-Directory -PathValue (Split-Path -Parent $DestinationPath)
+            Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
+            return [System.IO.Path]::GetFullPath($DestinationPath)
+        }
+
+        ".zip" {
+            $tempRoot = New-TemporaryDirectory
+            try {
+                Expand-ZipArchive -ArchivePath $SourcePath -Destination $tempRoot
+
+                $resolvedChipdb = $null
+                if (-not [string]::IsNullOrWhiteSpace($ArchiveSubPath)) {
+                    $resolvedChipdb = Resolve-RelativeToRoot -BasePath $tempRoot -RelativePath $ArchiveSubPath -File
+                }
+
+                if (-not $resolvedChipdb) {
+                    $resolvedChipdb = Find-FirstMatchingFile -Roots @($tempRoot) -Names @((Split-Path -Leaf $DestinationPath))
+                }
+
+                if (-not $resolvedChipdb) {
+                    throw "Could not find chipdb file inside $SourcePath"
+                }
+
+                Ensure-Directory -PathValue (Split-Path -Parent $DestinationPath)
+                Copy-Item -LiteralPath $resolvedChipdb -Destination $DestinationPath -Force
+                return [System.IO.Path]::GetFullPath($DestinationPath)
+            } finally {
+                Remove-DirectoryIfExists -PathValue $tempRoot
+            }
+        }
+
+        default {
+            throw "Unsupported chipdb asset type '$extension' for $SourcePath"
+        }
+    }
+}
+
+function Ensure-OptionalBundle {
+    param($Config)
+
+    $configuredRoot = Resolve-WorkspacePath (Get-ConfigValue -Object $Config -Path @("toolchainBundle", "root"))
+    if ($configuredRoot -and (Test-Path -LiteralPath $configuredRoot)) {
+        return [System.IO.Path]::GetFullPath($configuredRoot)
+    }
+
+    if ((Test-Path -LiteralPath $managedBundleRoot) -and -not $Force) {
+        return [System.IO.Path]::GetFullPath($managedBundleRoot)
+    }
+
+    if (-not $autoDownload) {
+        return $configuredRoot
+    }
+
+    $githubRepo = Get-ConfigValue -Object $Config -Path @("toolchainBundle", "githubRelease", "repo")
+    $githubTag = Get-ConfigValue -Object $Config -Path @("toolchainBundle", "githubRelease", "tag") -Default "latest"
+    $assetPatterns = Get-PathList -Config $Config -Path @("toolchainBundle", "githubRelease", "assetPatterns")
+    $downloadUrl = Get-ConfigValue -Object $Config -Path @("toolchainBundle", "downloadUrl")
+    $archiveName = Get-ConfigValue -Object $Config -Path @("toolchainBundle", "archiveName")
+
+    $cachePatterns = New-Object System.Collections.Generic.List[string]
+    foreach ($pattern in @($assetPatterns + @($archiveName))) {
+        if (-not [string]::IsNullOrWhiteSpace($pattern) -and -not $cachePatterns.Contains($pattern)) {
+            $cachePatterns.Add($pattern)
+        }
+    }
+
+    $cachedArchive = if (-not $Force -and $cachePatterns.Count -gt 0) {
+        Get-NewestMatchingFile -Directory $downloadsDir -Patterns @($cachePatterns)
+    } else {
+        $null
+    }
+
+    if ($cachedArchive) {
+        $archivePath = $cachedArchive.FullName
+        Write-Host "Using cached toolchain bundle $($cachedArchive.Name)"
+    } else {
+        $asset = $null
+        if (-not [string]::IsNullOrWhiteSpace($githubRepo) -and $assetPatterns.Count -gt 0) {
+            $asset = Get-GitHubReleaseAsset -Repository $githubRepo -Tag $githubTag -AssetPatterns $assetPatterns -Purpose "toolchain bundle"
+            if ($asset) {
+                $archiveName = $asset.Name
+            } elseif ([string]::IsNullOrWhiteSpace($downloadUrl)) {
+                return $configuredRoot
+            }
+        } elseif ([string]::IsNullOrWhiteSpace($downloadUrl)) {
+            return $configuredRoot
+        }
+
+        $archiveName = Get-DownloadFileName -Url $downloadUrl -DefaultName $archiveName
+        if ($asset) {
+            $archivePath = Join-Path $downloadsDir $asset.Name
+            Invoke-DownloadFile -Url $asset.Url -Destination $archivePath -ReuseExisting:(-not $Force)
+        } else {
+            $archivePath = Join-Path $downloadsDir $archiveName
+            Invoke-DownloadFile -Url $downloadUrl -Destination $archivePath -ReuseExisting:(-not $Force)
+        }
+    }
+
+    if ([System.IO.Path]::GetExtension($archivePath).ToLowerInvariant() -ne ".zip") {
+        throw "Unsupported toolchain bundle type '$([System.IO.Path]::GetExtension($archivePath))' for $archivePath"
+    }
+
+    Write-Host "Installing OpenXC7 bundle into $managedBundleRoot"
+    Expand-ZipArchive -ArchivePath $archivePath -Destination $managedBundleRoot
+    return [System.IO.Path]::GetFullPath($managedBundleRoot)
+}
+
+function Ensure-OssCadSuite {
+    param(
+        $Config,
+        [string]$BundleRoot
+    )
+
+    $configuredRoot = Resolve-WorkspacePath (Get-ConfigValue -Object $Config -Path @("ossCadSuite", "root"))
+    if ($configuredRoot -and (Test-Path -LiteralPath (Join-Path $configuredRoot "environment.bat"))) {
+        return [System.IO.Path]::GetFullPath($configuredRoot)
+    }
+
+    $bundleOssCadRelativeRoot = Get-ConfigValue -Object $Config -Path @("toolchainBundle", "ossCadSuiteRoot") -Default "oss-cad-suite"
+    $bundleOssCadRoot = if ($BundleRoot) {
+        Get-OssCadSuiteRootFromCandidates -Roots @($BundleRoot) -RelativePath $bundleOssCadRelativeRoot
+    } else {
+        $null
+    }
+    if ($bundleOssCadRoot) {
+        return $bundleOssCadRoot
+    }
+
+    $managedRoot = Get-OssCadSuiteRootFromCandidates -Roots @($managedOssCadExtractRoot) -RelativePath ""
+    if ($managedRoot -and -not $Force) {
+        return $managedRoot
+    }
+
+    if ((Test-Path -LiteralPath (Join-Path $legacyOssCadRoot "environment.bat")) -and -not $Force) {
+        return [System.IO.Path]::GetFullPath($legacyOssCadRoot)
+    }
+
+    if (-not $autoDownload) {
+        return $configuredRoot
+    }
+
+    $cachedArchive = if (-not $Force) {
+        Get-NewestMatchingFile -Directory $downloadsDir -Patterns @(
+            "oss-cad-suite-windows-x64-*.zip",
+            "oss-cad-suite-windows-x64-*.exe"
+        )
+    } else {
+        $null
+    }
+
+    if ($cachedArchive) {
+        $assetName = $cachedArchive.Name
+        $archivePath = $cachedArchive.FullName
+        Write-Host "Using cached OSS CAD Suite archive $assetName"
+    } else {
+        $asset = Get-GitHubReleaseAsset -Repository "YosysHQ/oss-cad-suite-build" -AssetPatterns @(
+            "*windows-x64*.zip",
+            "*windows-x64*.exe"
+        ) -Purpose "OSS CAD Suite"
+        $archivePath = Join-Path $downloadsDir $asset.Name
+        Invoke-DownloadFile -Url $asset.Url -Destination $archivePath -ReuseExisting:(-not $Force)
+    }
+
+    Write-Host "Installing OSS CAD Suite into $managedOssCadExtractRoot"
+    switch ([System.IO.Path]::GetExtension($archivePath).ToLowerInvariant()) {
+        ".zip" {
+            Expand-ZipArchive -ArchivePath $archivePath -Destination $managedOssCadExtractRoot
+        }
+
+        ".exe" {
+            Expand-SelfExtractingArchive -ArchivePath $archivePath -Destination $managedOssCadExtractRoot
+        }
+
+        default {
+            throw "Unsupported OSS CAD Suite asset type '$([System.IO.Path]::GetExtension($archivePath))' for $archivePath"
+        }
+    }
+
+    $installedRoot = Get-OssCadSuiteRootFromExtraction -Root $managedOssCadExtractRoot
+    if (-not $installedRoot) {
+        throw "OSS CAD Suite was extracted, but environment.bat was not found under $managedOssCadExtractRoot"
+    }
+
+    return $installedRoot
+}
+
+function Ensure-ChipDb {
+    param(
+        $Config,
+        [string]$BundleRoot
+    )
+
+    $chipdbRelativePath = Get-ConfigValue -Object $Config -Path @("chipdb", "path") -Default "tools\xc7a100t.bin"
+    $chipdbArchiveSubPath = Get-ConfigValue -Object $Config -Path @("chipdb", "archiveSubPath") -Default $chipdbRelativePath
+    $configuredChipdbPath = Resolve-WorkspacePath $chipdbRelativePath
+
+    if ($configuredChipdbPath -and (Test-Path -LiteralPath $configuredChipdbPath)) {
+        return [System.IO.Path]::GetFullPath($configuredChipdbPath)
+    }
+
+    $bundleChipdbPath = if ($BundleRoot) {
+        Resolve-RelativeToRoot -BasePath $BundleRoot -RelativePath $chipdbArchiveSubPath -File
+    } else {
+        $null
+    }
+    if ($bundleChipdbPath) {
+        return $bundleChipdbPath
+    }
+
+    if ((Test-Path -LiteralPath $managedChipdbPath) -and -not $Force) {
+        return [System.IO.Path]::GetFullPath($managedChipdbPath)
+    }
+
+    $legacyChipdbPath = Join-Path $legacyFpgaTools "source-build\build\nextpnr-xilinx\xc7a100t.bin"
+    if ((Test-Path -LiteralPath $legacyChipdbPath) -and -not $Force) {
+        return [System.IO.Path]::GetFullPath($legacyChipdbPath)
+    }
+
+    if (-not $autoDownload) {
+        return $configuredChipdbPath
+    }
+
+    $githubRepo = Get-ConfigValue -Object $Config -Path @("chipdb", "githubRelease", "repo")
+    $githubTag = Get-ConfigValue -Object $Config -Path @("chipdb", "githubRelease", "tag") -Default "latest"
+    $assetPatterns = Get-PathList -Config $Config -Path @("chipdb", "githubRelease", "assetPatterns")
+    $downloadUrl = Get-ConfigValue -Object $Config -Path @("chipdb", "downloadUrl")
+    $archiveName = Get-ConfigValue -Object $Config -Path @("chipdb", "archiveName")
+
+    $cachePatterns = New-Object System.Collections.Generic.List[string]
+    foreach ($pattern in @($assetPatterns + @($archiveName) + @((Split-Path -Leaf $managedChipdbPath)))) {
+        if (-not [string]::IsNullOrWhiteSpace($pattern) -and -not $cachePatterns.Contains($pattern)) {
+            $cachePatterns.Add($pattern)
+        }
+    }
+
+    $cachedAsset = if (-not $Force -and $cachePatterns.Count -gt 0) {
+        Get-NewestMatchingFile -Directory $downloadsDir -Patterns @($cachePatterns)
+    } else {
+        $null
+    }
+
+    if ($cachedAsset) {
+        $assetPath = $cachedAsset.FullName
+        Write-Host "Using cached chipdb asset $($cachedAsset.Name)"
+    } else {
+        $asset = $null
+        if (-not [string]::IsNullOrWhiteSpace($githubRepo) -and $assetPatterns.Count -gt 0) {
+            $asset = Get-GitHubReleaseAsset -Repository $githubRepo -Tag $githubTag -AssetPatterns $assetPatterns -Purpose "chipdb"
+            if ($asset) {
+                $archiveName = $asset.Name
+            } elseif ([string]::IsNullOrWhiteSpace($downloadUrl)) {
+                return $configuredChipdbPath
+            }
+        } elseif ([string]::IsNullOrWhiteSpace($downloadUrl)) {
+            return $configuredChipdbPath
+        }
+
+        $archiveName = Get-DownloadFileName -Url $downloadUrl -DefaultName $archiveName
+        if ($asset) {
+            $assetPath = Join-Path $downloadsDir $asset.Name
+            Invoke-DownloadFile -Url $asset.Url -Destination $assetPath -ReuseExisting:(-not $Force)
+        } else {
+            $assetPath = Join-Path $downloadsDir $archiveName
+            Invoke-DownloadFile -Url $downloadUrl -Destination $assetPath -ReuseExisting:(-not $Force)
+        }
+    }
+
+    return Install-ChipDbAsset -SourcePath $assetPath -ArchiveSubPath $chipdbArchiveSubPath -DestinationPath $managedChipdbPath
+}
+
+$defaultConfig = Read-ConfigFile -PathValue $defaultConfigPath
+$localConfig = Read-ConfigFile -PathValue $localConfigPath
+$config = Merge-ConfigData -Base $defaultConfig -Override $localConfig
+
+$autoDownload = [bool](Get-ConfigValue -Object $config -Path @("autoDownload") -Default $true)
+$toolchainStoreRoot = Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("sharedToolchainRoot") -Default $defaultSharedToolchainRoot)
+$downloadsDir = Join-Path $toolchainStoreRoot "downloads"
+$managedBundleRoot = Join-Path $toolchainStoreRoot "openxc7-bundle"
+$managedOssCadExtractRoot = Join-Path $toolchainStoreRoot "oss-cad-suite-install"
+$managedChipdbRoot = Join-Path $toolchainStoreRoot "chipdb"
+$part = Get-ConfigValue -Object $config -Path @("part") -Default "xc7a100tcsg324-1"
+$managedChipdbPath = Join-Path $managedChipdbRoot (Split-Path -Leaf (Get-ConfigValue -Object $config -Path @("chipdb", "archiveSubPath") -Default "tools\xc7a100t.bin"))
+
+Ensure-Directory -PathValue $toolchainStoreRoot
+Ensure-Directory -PathValue $downloadsDir
+
+$bundleRoot = Ensure-OptionalBundle -Config $config
+$ossCadRoot = Ensure-OssCadSuite -Config $config -BundleRoot $bundleRoot
+$chipdb = Ensure-ChipDb -Config $config -BundleRoot $bundleRoot
+
+$prjxrayRelativeRoot = Get-ConfigValue -Object $config -Path @("toolchainBundle", "prjxrayRoot") -Default "src\prjxray"
+$prjxrayDbRelativeRoot = Get-ConfigValue -Object $config -Path @("toolchainBundle", "prjxrayDbRoot") -Default "src\prjxray-db\artix7"
+$nextpnrRelativeExe = Get-ConfigValue -Object $config -Path @("toolchainBundle", "nextpnrExe") -Default "nextpnr-xilinx.exe"
+$xc7framesRelativeExe = Get-ConfigValue -Object $config -Path @("toolchainBundle", "xc7frames2bitExe") -Default "build\prjxray\tools\xc7frames2bit.exe"
+$pathExtrasRelative = Get-PathList -Config $config -Path @("toolchainBundle", "pathExtras")
+
+$prjxrayRoot = Resolve-FirstExistingPath @(
+    (Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("projectXray", "root"))),
+    (Resolve-RelativeToRoot -BasePath $bundleRoot -RelativePath $prjxrayRelativeRoot -Directory),
+    (Join-Path $legacyFpgaTools "source-build\src\prjxray")
+)
+
+$prjxrayUtilsFromRoot = if ($prjxrayRoot) { Join-Path $prjxrayRoot "utils" } else { $null }
+$prjxrayFasmFromRoot = if ($prjxrayRoot) { Join-Path $prjxrayRoot "third_party\fasm" } else { $null }
+
+$prjxrayUtils = Resolve-FirstExistingPath @(
+    (Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("projectXray", "utilsPath"))),
+    $prjxrayUtilsFromRoot,
+    (Join-Path $legacyFpgaTools "source-build\src\prjxray\utils")
+)
+
+$prjxrayFasm = Resolve-FirstExistingPath @(
+    (Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("projectXray", "fasmPath"))),
+    $prjxrayFasmFromRoot,
+    (Join-Path $legacyFpgaTools "source-build\src\prjxray\third_party\fasm")
+)
+
+$xrayDbRoot = Resolve-FirstExistingPath @(
+    (Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("projectXray", "dbRoot"))),
+    (Resolve-RelativeToRoot -BasePath $bundleRoot -RelativePath $prjxrayDbRelativeRoot -Directory),
+    (Find-ProjectXrayDatabaseRoot -Root $bundleRoot -Part $part),
+    (Join-Path $legacyFpgaTools "source-build\src\prjxray-db\artix7")
+)
+
+$nextpnrExe = Resolve-FirstExistingPath @(
+    (Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("nextpnrXilinx", "exePath"))),
+    (Resolve-RelativeToRoot -BasePath $bundleRoot -RelativePath $nextpnrRelativeExe -File),
+    $legacyNextpnrExe
+)
+
+$configuredPythonExe = Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("pythonExe"))
+$pythonCandidates = @(
+    $configuredPythonExe,
+    (Join-Path $legacyFpgaTools "pyenv\bin\python.exe"),
+    (Join-Path $ossCadRoot "lib\python3.exe"),
+    (Find-FirstMatchingFile -Roots @($ossCadRoot) -Names @("python3.exe", "python.exe"))
+)
+$pythonExe = $null
+foreach ($candidate in $pythonCandidates) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate) -and (Test-PythonModule -PythonPath $candidate -ModuleName "textx")) {
+        $pythonExe = [System.IO.Path]::GetFullPath($candidate)
+        break
+    }
+}
+
+if (-not $pythonExe) {
+    $pythonExe = Resolve-FirstExistingPath $pythonCandidates
+}
+
+$xc7frames2bitExe = Resolve-FirstExistingPath @(
+    (Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("projectXray", "xc7frames2bitExe"))),
+    (Resolve-RelativeToRoot -BasePath $bundleRoot -RelativePath $xc7framesRelativeExe -File),
+    (Join-Path $legacyFpgaTools "source-build\build\prjxray\tools\xc7frames2bit.exe")
+)
+
+$extraPaths = New-Object System.Collections.Generic.List[string]
+foreach ($pathEntry in @(
+    # nextpnr-xilinx-patched.exe is linked against the MSYS2/UCRT runtime.
+    # Keep those DLLs ahead of oss-cad-suite\lib to avoid loader entry-point mismatches.
+    (Join-Path $legacyFpgaTools "msys64\ucrt64\bin"),
+    (Join-Path $legacyFpgaTools "msys64\usr\bin"),
+    (Join-Path $legacyFpgaTools "bin"),
+    (Join-Path $ossCadRoot "bin"),
+    (Join-Path $ossCadRoot "lib")
+)) {
+    if ($pathEntry -and (Test-Path -LiteralPath $pathEntry) -and -not $extraPaths.Contains($pathEntry)) {
+        $extraPaths.Add($pathEntry)
+    }
+}
+
+foreach ($relativeExtra in $pathExtrasRelative) {
+    $resolvedExtra = Resolve-RelativeToRoot -BasePath $bundleRoot -RelativePath $relativeExtra -Directory
+    if ($resolvedExtra -and (Test-Path -LiteralPath $resolvedExtra) -and -not $extraPaths.Contains($resolvedExtra)) {
+        $extraPaths.Add($resolvedExtra)
+    }
+}
+
+$partFile = if ($xrayDbRoot) { Join-Path $xrayDbRoot "$part\part.yaml" } else { $null }
+$openFpgaLoaderCable = Get-ConfigValue -Object $config -Path @("openFpgaLoader", "cable") -Default "digilent"
+$openFpgaLoaderBoard = Get-ConfigValue -Object $config -Path @("openFpgaLoader", "board") -Default "nexys_a7_100"
+
+$required = @(
+    @{ Name = "OSS CAD Suite environment"; Path = if ($ossCadRoot) { Join-Path $ossCadRoot "environment.bat" } else { $null } },
+    @{ Name = "yosys"; Path = if ($ossCadRoot) { Join-Path $ossCadRoot "bin\yosys.exe" } else { $null } },
+    @{ Name = "openFPGALoader"; Path = if ($ossCadRoot) { Join-Path $ossCadRoot "bin\openFPGALoader.exe" } else { $null } },
+    @{ Name = "Python"; Path = $pythonExe },
+    @{ Name = "nextpnr-xilinx"; Path = $nextpnrExe },
+    @{ Name = "xc7frames2bit"; Path = $xc7frames2bitExe },
+    @{ Name = "Project X-Ray utils"; Path = $prjxrayUtils },
+    @{ Name = "Project X-Ray database"; Path = $xrayDbRoot },
+    @{ Name = "Project X-Ray part file"; Path = $partFile },
+    @{ Name = "chipdb"; Path = $chipdb }
+)
+
+$missing = @($required | Where-Object { -not $_.Path -or -not (Test-Path -LiteralPath $_.Path) })
+if ($missing.Count -gt 0) {
+    Write-Host ""
+    Write-Host "Toolchain setup is incomplete. Missing items:"
+    foreach ($item in $missing) {
+        Write-Host "  - $($item.Name): $($item.Path)"
+    }
+    Write-Host ""
+    Write-Host "If you already have these tools, create toolchain.local.json and point the paths there."
+    Write-Host "If you want automatic downloads, publish or configure the bundle/chipdb release assets."
+    exit 1
+}
+
+$pythonPathParts = New-Object System.Collections.Generic.List[string]
+foreach ($pythonPathEntry in @($prjxrayRoot, $prjxrayFasm)) {
+    if ($pythonPathEntry -and (Test-Path -LiteralPath $pythonPathEntry) -and -not $pythonPathParts.Contains($pythonPathEntry)) {
+        $pythonPathParts.Add($pythonPathEntry)
+    }
+}
+
+$envValues = [ordered]@{
+    CHIPDB = $chipdb
+    NEXTPNR_EXE = $nextpnrExe
+    OPENFPGALOADER_BOARD = $openFpgaLoaderBoard
+    OPENFPGALOADER_CABLE = $openFpgaLoaderCable
+    OPENFPGALOADER_EXE = Join-Path $ossCadRoot "bin\openFPGALoader.exe"
+    OSS_CAD = $ossCadRoot
+    OSS_CAD_ENV = Join-Path $ossCadRoot "environment.bat"
+    PART = $part
+    PART_FILE = $partFile
+    PATH = (($extraPaths -join ";") + ";%PATH%")
+    PYTHON_EXE = $pythonExe
+    PYTHONPATH = if ($pythonPathParts.Count -gt 0) { ($pythonPathParts -join ";") } else { "%PYTHONPATH%" }
+    PRJXRAY_UTILS = $prjxrayUtils
+    XRAY_DB_ROOT = $xrayDbRoot
+    XC7FRAMES2BIT_EXE = $xc7frames2bitExe
+    YOSYS_EXE = Join-Path $ossCadRoot "bin\yosys.exe"
+}
+
+Write-EnvFile -FilePath $envFile -Values $envValues
+
+Write-Host ""
+Write-Host "Toolchain ready."
+Write-Host "  Cache root    : $toolchainStoreRoot"
+Write-Host "  OSS CAD Suite : $ossCadRoot"
+Write-Host "  Yosys         : $($envValues.YOSYS_EXE)"
+Write-Host "  nextpnr       : $nextpnrExe"
+Write-Host "  xc7frames2bit : $xc7frames2bitExe"
+Write-Host "  chipdb        : $chipdb"
+Write-Host "  env file      : $envFile"
