@@ -9,9 +9,13 @@ shift
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "SETUP_SCRIPT=%ROOT%\setup.ps1"
+set "PACKAGE_TOOLCHAIN_SCRIPT=%ROOT%\package-toolchain.ps1"
 set "ENV_FILE=%ROOT%\.toolchain\env.bat"
 
 if /I "%COMMAND%"=="setup" goto :setup
+if /I "%COMMAND%"=="install" goto :setup
+if /I "%COMMAND%"=="bundle" goto :bundle
+if /I "%COMMAND%"=="package-toolchain" goto :bundle
 
 call :ensure_toolchain || exit /b 1
 call "%ENV_FILE%" || exit /b 1
@@ -28,6 +32,21 @@ set "SETUP_FORCE="
 if /I "%~1"=="--force" set "SETUP_FORCE=-Force"
 if /I "%~1"=="/force" set "SETUP_FORCE=-Force"
 powershell -ExecutionPolicy Bypass -File "%SETUP_SCRIPT%" -Ensure %SETUP_FORCE%
+exit /b %ERRORLEVEL%
+
+:bundle
+set "BUNDLE_OUTPUT="
+set "PACKAGE_FORCE="
+if /I "%~1"=="--force" (
+  set "PACKAGE_FORCE=-Force"
+) else if /I "%~1"=="/force" (
+  set "PACKAGE_FORCE=-Force"
+) else (
+  set "BUNDLE_OUTPUT=%~1"
+)
+if /I "%~2"=="--force" set "PACKAGE_FORCE=-Force"
+if /I "%~2"=="/force" set "PACKAGE_FORCE=-Force"
+powershell -ExecutionPolicy Bypass -File "%PACKAGE_TOOLCHAIN_SCRIPT%" -OutputPath "%BUNDLE_OUTPUT%" %PACKAGE_FORCE%
 exit /b %ERRORLEVEL%
 
 :ensure_toolchain
@@ -75,7 +94,9 @@ exit /b 0
 
 :usage
 echo Usage:
+echo   %~nx0 install [--force]
 echo   %~nx0 setup [--force]
+echo   %~nx0 bundle [output.zip] [--force]
 echo   %~nx0 build ^<design.sv^> [top] [constraints.xdc]
 echo   %~nx0 program [build\design.bit]
 exit /b 1
