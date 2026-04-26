@@ -44,106 +44,95 @@ Current example
 - Constraints: `constraints\your_design_openxc7.xdc`
 - Top module: `your_design`
 
-How to build
+Fast start
+
+Other users should not need to edit any JSON file.
 
 ```powershell
-# Generate or refresh the local toolchain environment.
-.\fpga.bat setup
+# 1. Clone or copy this repository.
 
-# Build the default design: src\your_design.sv
+# 2. Install or refresh the cached Windows FPGA toolchain.
+.\fpga.bat install
+
+# 3. Build the default design: src\your_design.sv
 .\fpga.bat build
 
-# Build a specific project explicitly.
-.\fpga.bat build "src\project1\project1.sv" project1 "constraints\project1_openxc7.xdc"
-
-# Program the generated bitstream.
+# 4. Program the generated bitstream.
 .\fpga.bat program "build\your_design.bit"
 ```
 
-Step-by-step setup
-
-1. Clone or copy this repository.
-
-2. Optional: copy `toolchain.local.example.json` to `toolchain.local.json` if you want to override tool paths or let the script download your own prepacked OpenXC7 bundle.
+`install` and `setup` are the same command. `build` and `program` always run setup first, so most users can go straight to:
 
 ```powershell
-# Optional: create a local toolchain config you can edit.
-Copy-Item .\toolchain.local.example.json .\toolchain.local.json
+.\fpga.bat build
+```
 
-# Edit the config if you want custom tool paths or a bundle download URL.
+What setup does automatically
+
+- reads repo defaults from `toolchain.json`
+- applies optional local overrides from `toolchain.local.json`
+- prefers a published OpenXC7 bundle asset from the repo's latest GitHub release
+- reuses an existing OSS CAD Suite install if found
+- otherwise reuses a cached OSS CAD archive from `%LOCALAPPDATA%\fpga-tools-cache\downloads`
+- otherwise downloads the latest Windows OSS CAD Suite release into the shared cache
+- extracts current Windows OSS CAD Suite `.zip` or self-extracting `.exe` releases automatically
+- reuses existing local `nextpnr-xilinx`, Project X-Ray, and `xc7frames2bit` installs if found
+- reuses a local `tools\xc7a100t.bin`, a cached chipdb, or a published chipdb release asset when configured
+- writes a small repo-local `.toolchain\env.bat` for build and program commands
+- reuses the shared cache for later FPGA repositories on the same machine
+
+Setup keeps downloaded archives under `%LOCALAPPDATA%\fpga-tools-cache\downloads`, so the first run is the heavy run and later runs are usually fast.
+
+Optional local override
+
+Only create `toolchain.local.json` if you want to override the repo defaults with your own paths or download sources.
+
+```powershell
+Copy-Item .\toolchain.local.example.json .\toolchain.local.json
 notepad .\toolchain.local.json
 ```
 
-3. Run setup:
+Maintainer release flow
+
+The simple user install path depends on the repository publishing a Windows bundle and optionally a chipdb asset in GitHub Releases.
+
+- bundle users should download: `nexys-a7-100t-toolchain-windows.zip`
+- bundle layout expected by `setup.ps1`:
+  - `oss-cad-suite\...`
+  - `nextpnr-xilinx.exe`
+  - `src\prjxray\...`
+  - `src\prjxray-db\artix7\...`
+  - `build\prjxray\tools\xc7frames2bit.exe`
+  - optional `tools\xc7a100t.bin`
+- chipdb asset can be either `xc7a100t.bin` directly or a zip containing that file
+
+If you already have a working Windows toolchain on one machine, package it once and upload the zip as a release asset:
 
 ```powershell
-# Reuse installed tools when present. If a download is needed, it is cached once
-# under %LOCALAPPDATA%\fpga-tools-cache and reused by other FPGA projects.
-.\fpga.bat setup
+# Build a single Windows bundle zip from the currently working toolchain.
+.\fpga.bat bundle
 
-# Force a fresh download/install instead of reusing cached archives.
-.\fpga.bat setup --force
+# Write to a specific archive path if you prefer.
+.\fpga.bat bundle "dist\my-toolchain.zip" --force
 ```
 
-4. What setup does automatically:
-   - reuses an existing OSS CAD Suite install if found
-   - otherwise reuses a cached installer from `%LOCALAPPDATA%\fpga-tools-cache\downloads` when available
-   - otherwise downloads the latest Windows OSS CAD Suite release into the shared cache
-   - reuses existing local `nextpnr-xilinx`, Project X-Ray, and `xc7frames2bit` installs if found
-   - writes a small repo-local `.toolchain\env.bat` for build and program commands
-   - reuses a cached OpenXC7 bundle archive before downloading it again
-   - lets later repositories reuse the same cached toolchain instead of reinstalling everything
+If you want to program with `openFPGALoader` on native Windows, install the correct USB driver with Zadig.
+Usually:
+- open Zadig as Administrator
+- enable `Options > List All Devices`
+- select the Digilent / FTDI JTAG device
+- install `WinUSB`
 
-   Note: recent OSS CAD Suite Windows releases are published as `oss-cad-suite-windows-x64-<date>.exe` self-extracting installers instead of zip archives. If setup asks you to install one manually, run the downloaded `.exe`, then point `ossCadSuite.root` in `toolchain.local.json` at the extracted `oss-cad-suite` folder and rerun setup.
+Replug the board after driver installation.
 
-5. What setup cannot infer by itself:
-   - a Windows `nextpnr-xilinx` binary if you do not already have one
-   - a Project X-Ray / `xc7frames2bit` bundle if you do not already have one
-
-6. If those tools are missing, use one of these:
-   - point `toolchain.local.json` at your existing installs
-   - set `toolchainBundle.downloadUrl` in `toolchain.local.json` to a zip file that contains your prepacked `nextpnr-xilinx` and Project X-Ray tools
-   - keep the default `sharedToolchainRoot` so one install can be reused by multiple projects
-
-7. Keep the chip database file available locally at:
-   - `tools\xc7a100t.bin`
-   - this file is larger than GitHub's normal 100 MB file limit, so it is not included in the GitHub repository by default
-
-8. If you want to program with `openFPGALoader` on native Windows, install the correct USB driver with Zadig.
-   Usually:
-   - open Zadig as Administrator
-   - enable `Options > List All Devices`
-   - select the Digilent / FTDI JTAG device
-   - install `WinUSB`
-
-9. Replug the board after driver installation.
-
-10. Test Yosys directly:
+Quick checks
 
 ```powershell
-# Check whether the Windows Yosys executable can start.
-& "C:\fpga-tools\oss-cad-suite\bin\yosys.exe" -V
-```
+# Check whether the configured Windows Yosys executable can start.
+cmd /c "call .\.toolchain\env.bat && ""%YOSYS_EXE%"" -V"
 
-11. Test programming cable detection:
-
-```powershell
 # Check whether openFPGALoader can see the USB JTAG cable.
-cmd /c "call C:\fpga-tools\oss-cad-suite\environment.bat && openFPGALoader --scan-usb"
-```
-
-12. Build:
-
-```powershell
-# Build the default design.
-.\fpga.bat build
-```
-
-13. Program:
-
-```powershell
-# Program the generated bitstream to the board.
-.\fpga.bat program "build\your_design.bit"
+cmd /c "call .\.toolchain\env.bat && call ""%OSS_CAD_ENV%"" && ""%OPENFPGALOADER_EXE%"" --scan-usb"
 ```
 
 Important notes

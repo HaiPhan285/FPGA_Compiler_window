@@ -1,9 +1,6 @@
 {
   "autoDownload": true,
   "sharedToolchainRoot": "%LOCALAPPDATA%\\fpga-tools-cache",
-  "ossCadSuite": {
-    "root": ""
-  },
   "toolchainBundle": {
     "root": "",
     "downloadUrl": "",
@@ -19,11 +16,13 @@
       "msys64\\usr\\bin"
     ],
     "githubRelease": {
-      "repo": "",
+      "repo": "HaiPhan285/FPGA_Compiler-",
       "tag": "latest",
       "assetPatterns": [
         "*toolchain*windows*.zip",
-        "*openxc7*windows*.zip"
+        "*openxc7*windows*.zip",
+        "*toolchain*.zip",
+        "*openxc7*.zip"
       ]
     }
   },
@@ -45,9 +44,9 @@
     "path": "tools\\xc7a100t.bin",
     "downloadUrl": "",
     "archiveName": "",
-    "archiveSubPath": "",
+    "archiveSubPath": "tools\\xc7a100t.bin",
     "githubRelease": {
-      "repo": "",
+      "repo": "HaiPhan285/FPGA_Compiler-",
       "tag": "latest",
       "assetPatterns": [
         "*xc7a100t*.bin",
