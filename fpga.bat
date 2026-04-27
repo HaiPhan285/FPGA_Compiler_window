@@ -46,7 +46,11 @@ if /I "%~1"=="--force" (
 )
 if /I "%~2"=="--force" set "PACKAGE_FORCE=-Force"
 if /I "%~2"=="/force" set "PACKAGE_FORCE=-Force"
-powershell -ExecutionPolicy Bypass -File "%PACKAGE_TOOLCHAIN_SCRIPT%" -OutputPath "%BUNDLE_OUTPUT%" %PACKAGE_FORCE%
+if defined BUNDLE_OUTPUT (
+  powershell -ExecutionPolicy Bypass -File "%PACKAGE_TOOLCHAIN_SCRIPT%" -OutputPath "%BUNDLE_OUTPUT%" %PACKAGE_FORCE%
+) else (
+  powershell -ExecutionPolicy Bypass -File "%PACKAGE_TOOLCHAIN_SCRIPT%" %PACKAGE_FORCE%
+)
 exit /b %ERRORLEVEL%
 
 :ensure_toolchain

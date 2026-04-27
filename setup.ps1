@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $stateDir = Join-Path $root ".toolchain"
@@ -381,8 +382,8 @@ function Expand-SelfExtractingArchive {
 
     $attemptErrors = New-Object System.Collections.Generic.List[string]
     $attempts = @(
-        @("-y", "-aoa", "-o$Destination"),
-        @("x", "-y", "-aoa", "-o$Destination")
+        @("-y", "-o$Destination"),
+        @("x", "-y", "-o$Destination")
     )
 
     foreach ($attempt in $attempts) {
@@ -447,7 +448,8 @@ function Get-GitHubReleaseAsset {
         [string]$Repository,
         [string]$Tag = "latest",
         [string[]]$AssetPatterns,
-        [string]$Purpose = "release"
+        [string]$Purpose = "release",
+        [switch]$AllowMissing
     )
 
     if ([string]::IsNullOrWhiteSpace($Repository)) {
@@ -482,7 +484,13 @@ function Get-GitHubReleaseAsset {
             return $null
         }
 
-        throw "GitHub $Purpose lookup failed for '$Repository' from $releaseUri. $($_.Exception.Message)"
+        $lookupMessage = "GitHub $Purpose lookup failed for '$Repository' from $releaseUri. $($_.Exception.Message)"
+        if ($AllowMissing) {
+            Write-Host $lookupMessage
+            return $null
+        }
+
+        throw $lookupMessage
     }
 
     $assets = @($release.assets)
@@ -512,21 +520,29 @@ function Get-GitHubReleaseAsset {
         ""
     }
 
-    throw "Could not find a $Purpose asset in $Repository release $($release.tag_name) matching: $($patterns -join ', ').$availableMessage"
-}
-
-function Get-NewestMatchingFile {
-    param(
-        [string]$Directory,
-        [string[]]$Patterns
-    )
-
-    if (-not (Test-Path -LiteralPath $Directory)) {
+    $missingMessage = "Could not find a $Purpose asset in $Repository release $($release.tag_name) matching: $($patterns -join ', ').$availableMessage"
+    if ($AllowMissing) {
+        Write-Host $missingMessage
         return $null
     }
 
-    $matches = foreach ($pattern in $Patterns) {
-        Get-ChildItem -LiteralPath $Directory -File -Filter $pattern -ErrorAction SilentlyContinue
+    throw $missingMessage
+}
+
+function Get-NewestMatchingFileInDirectories {
+    param(
+        [string[]]$Directories,
+        [string[]]$Patterns
+    )
+
+    $matches = foreach ($directory in $Directories) {
+        if ([string]::IsNullOrWhiteSpace($directory) -or -not (Test-Path -LiteralPath $directory)) {
+            continue
+        }
+
+        foreach ($pattern in $Patterns) {
+            Get-ChildItem -LiteralPath $directory -File -Filter $pattern -ErrorAction SilentlyContinue
+        }
     }
 
     return @($matches | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)[0]
@@ -540,6 +556,16 @@ function Expand-ZipArchive {
 
     Remove-DirectoryIfExists -PathValue $Destination
     Ensure-Directory -PathValue $Destination
+
+    $tarCommand = Get-Command "tar.exe" -ErrorAction SilentlyContinue
+    if ($tarCommand) {
+        & $tarCommand.Source -xf $ArchivePath -C $Destination
+        if ($LASTEXITCODE -ne 0) {
+            throw "tar.exe failed with exit code $LASTEXITCODE while extracting $ArchivePath"
+        }
+        return
+    }
+
     Expand-Archive -LiteralPath $ArchivePath -DestinationPath $Destination -Force
 }
 
@@ -580,8 +606,16 @@ function Test-PythonModule {
         return $false
     }
 
-    & $PythonPath -c "import $ModuleName" *> $null
-    return ($LASTEXITCODE -eq 0)
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & $PythonPath -c "import $ModuleName" *> $null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
 }
 
 function Get-PathList {
@@ -619,6 +653,72 @@ function Write-EnvFile {
 
     $text = ($lines -join "`r`n") + "`r`n"
     Set-Content -LiteralPath $FilePath -Value $text -Encoding ASCII
+}
+
+function Get-BatchEnvironmentValues {
+    param([string]$FilePath)
+
+    $values = @{}
+    if (-not (Test-Path -LiteralPath $FilePath)) {
+        return $values
+    }
+
+    foreach ($line in Get-Content -LiteralPath $FilePath) {
+        if ($line -match '^set "(?<name>[^=]+)=(?<value>.*)"$') {
+            $values[$matches.name] = $matches.value
+        }
+    }
+
+    return $values
+}
+
+function Test-ToolchainEnvFile {
+    param(
+        [string]$FilePath,
+        [string[]]$DependencyPaths
+    )
+
+    if (-not (Test-Path -LiteralPath $FilePath)) {
+        return $false
+    }
+
+    $envItem = Get-Item -LiteralPath $FilePath
+    foreach ($dependencyPath in $DependencyPaths) {
+        if ([string]::IsNullOrWhiteSpace($dependencyPath) -or -not (Test-Path -LiteralPath $dependencyPath)) {
+            continue
+        }
+
+        $dependencyItem = Get-Item -LiteralPath $dependencyPath
+        if ($dependencyItem.LastWriteTimeUtc -gt $envItem.LastWriteTimeUtc) {
+            return $false
+        }
+    }
+
+    $values = Get-BatchEnvironmentValues -FilePath $FilePath
+    foreach ($key in @(
+        "CHIPDB",
+        "NEXTPNR_EXE",
+        "OPENFPGALOADER_EXE",
+        "OSS_CAD",
+        "OSS_CAD_ENV",
+        "PART_FILE",
+        "PRJXRAY_UTILS",
+        "PYTHON_EXE",
+        "XC7FRAMES2BIT_EXE",
+        "XRAY_DB_ROOT",
+        "YOSYS_EXE"
+    )) {
+        if (-not $values.ContainsKey($key)) {
+            return $false
+        }
+
+        $pathValue = $values[$key]
+        if ([string]::IsNullOrWhiteSpace($pathValue) -or -not (Test-Path -LiteralPath $pathValue)) {
+            return $false
+        }
+    }
+
+    return $true
 }
 
 function Get-DownloadFileName {
@@ -721,7 +821,7 @@ function Ensure-OptionalBundle {
     }
 
     $cachedArchive = if (-not $Force -and $cachePatterns.Count -gt 0) {
-        Get-NewestMatchingFile -Directory $downloadsDir -Patterns @($cachePatterns)
+        Get-NewestMatchingFileInDirectories -Directories @($repoDownloadsDir, $downloadsDir) -Patterns @($cachePatterns)
     } else {
         $null
     }
@@ -732,7 +832,7 @@ function Ensure-OptionalBundle {
     } else {
         $asset = $null
         if (-not [string]::IsNullOrWhiteSpace($githubRepo) -and $assetPatterns.Count -gt 0) {
-            $asset = Get-GitHubReleaseAsset -Repository $githubRepo -Tag $githubTag -AssetPatterns $assetPatterns -Purpose "toolchain bundle"
+            $asset = Get-GitHubReleaseAsset -Repository $githubRepo -Tag $githubTag -AssetPatterns $assetPatterns -Purpose "toolchain bundle" -AllowMissing
             if ($asset) {
                 $archiveName = $asset.Name
             } elseif ([string]::IsNullOrWhiteSpace($downloadUrl)) {
@@ -796,7 +896,7 @@ function Ensure-OssCadSuite {
     }
 
     $cachedArchive = if (-not $Force) {
-        Get-NewestMatchingFile -Directory $downloadsDir -Patterns @(
+        Get-NewestMatchingFileInDirectories -Directories @($repoDownloadsDir, $downloadsDir) -Patterns @(
             "oss-cad-suite-windows-x64-*.zip",
             "oss-cad-suite-windows-x64-*.exe"
         )
@@ -890,7 +990,7 @@ function Ensure-ChipDb {
     }
 
     $cachedAsset = if (-not $Force -and $cachePatterns.Count -gt 0) {
-        Get-NewestMatchingFile -Directory $downloadsDir -Patterns @($cachePatterns)
+        Get-NewestMatchingFileInDirectories -Directories @($repoDownloadsDir, $downloadsDir) -Patterns @($cachePatterns)
     } else {
         $null
     }
@@ -901,7 +1001,7 @@ function Ensure-ChipDb {
     } else {
         $asset = $null
         if (-not [string]::IsNullOrWhiteSpace($githubRepo) -and $assetPatterns.Count -gt 0) {
-            $asset = Get-GitHubReleaseAsset -Repository $githubRepo -Tag $githubTag -AssetPatterns $assetPatterns -Purpose "chipdb"
+            $asset = Get-GitHubReleaseAsset -Repository $githubRepo -Tag $githubTag -AssetPatterns $assetPatterns -Purpose "chipdb" -AllowMissing
             if ($asset) {
                 $archiveName = $asset.Name
             } elseif ([string]::IsNullOrWhiteSpace($downloadUrl)) {
@@ -931,6 +1031,7 @@ $config = Merge-ConfigData -Base $defaultConfig -Override $localConfig
 $autoDownload = [bool](Get-ConfigValue -Object $config -Path @("autoDownload") -Default $true)
 $toolchainStoreRoot = Resolve-WorkspacePath (Get-ConfigValue -Object $config -Path @("sharedToolchainRoot") -Default $defaultSharedToolchainRoot)
 $downloadsDir = Join-Path $toolchainStoreRoot "downloads"
+$repoDownloadsDir = Join-Path $root "tools-cache"
 $managedBundleRoot = Join-Path $toolchainStoreRoot "openxc7-bundle"
 $managedOssCadExtractRoot = Join-Path $toolchainStoreRoot "oss-cad-suite-install"
 $managedChipdbRoot = Join-Path $toolchainStoreRoot "chipdb"
@@ -939,6 +1040,11 @@ $managedChipdbPath = Join-Path $managedChipdbRoot (Split-Path -Leaf (Get-ConfigV
 
 Ensure-Directory -PathValue $toolchainStoreRoot
 Ensure-Directory -PathValue $downloadsDir
+
+if (-not $Force -and (Test-ToolchainEnvFile -FilePath $envFile -DependencyPaths @($defaultConfigPath, $localConfigPath))) {
+    Write-Host "Toolchain ready (cached env): $envFile"
+    return
+}
 
 $bundleRoot = Ensure-OptionalBundle -Config $config
 $ossCadRoot = Ensure-OssCadSuite -Config $config -BundleRoot $bundleRoot
@@ -1010,6 +1116,13 @@ $xc7frames2bitExe = Resolve-FirstExistingPath @(
 )
 
 $extraPaths = New-Object System.Collections.Generic.List[string]
+foreach ($relativeExtra in $pathExtrasRelative) {
+    $resolvedExtra = Resolve-RelativeToRoot -BasePath $bundleRoot -RelativePath $relativeExtra -Directory
+    if ($resolvedExtra -and (Test-Path -LiteralPath $resolvedExtra) -and -not $extraPaths.Contains($resolvedExtra)) {
+        $extraPaths.Add($resolvedExtra)
+    }
+}
+
 foreach ($pathEntry in @(
     # nextpnr-xilinx-patched.exe is linked against the MSYS2/UCRT runtime.
     # Keep those DLLs ahead of oss-cad-suite\lib to avoid loader entry-point mismatches.
@@ -1021,13 +1134,6 @@ foreach ($pathEntry in @(
 )) {
     if ($pathEntry -and (Test-Path -LiteralPath $pathEntry) -and -not $extraPaths.Contains($pathEntry)) {
         $extraPaths.Add($pathEntry)
-    }
-}
-
-foreach ($relativeExtra in $pathExtrasRelative) {
-    $resolvedExtra = Resolve-RelativeToRoot -BasePath $bundleRoot -RelativePath $relativeExtra -Directory
-    if ($resolvedExtra -and (Test-Path -LiteralPath $resolvedExtra) -and -not $extraPaths.Contains($resolvedExtra)) {
-        $extraPaths.Add($resolvedExtra)
     }
 }
 

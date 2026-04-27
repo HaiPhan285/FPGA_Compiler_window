@@ -12,6 +12,7 @@
     "xc7frames2bitExe": "build\\prjxray\\tools\\xc7frames2bit.exe",
     "pathExtras": [
       "bin",
+      "msys64\\mingw64\\bin",
       "msys64\\ucrt64\\bin",
       "msys64\\usr\\bin"
     ],

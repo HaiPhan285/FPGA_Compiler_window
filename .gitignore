@@ -1,4 +1,11 @@
 .toolchain/
+.tmp_xc7frames2bit*/
+_openxc7_src/
 build/
+dist/
 toolchain.local.json
 tools/xc7a100t.bin
+tools-cache/*
+!tools-cache/.gitkeep
+!tools-cache/*.zip
+!tools-cache/*.exe

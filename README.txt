@@ -83,6 +83,31 @@ What setup does automatically
 
 Setup keeps downloaded archives under `%LOCALAPPDATA%\fpga-tools-cache\downloads`, so the first run is the heavy run and later runs are usually fast.
 
+Faster setup options
+
+Setup checks these places before downloading:
+
+1. A valid repo-local `.toolchain\env.bat`
+2. Paths in `toolchain.local.json`
+3. Archives copied into `tools-cache\`
+4. Archives cached in `%LOCALAPPDATA%\fpga-tools-cache\downloads`
+5. GitHub Release assets configured in `toolchain.json`
+
+For sharing with other people, prefer GitHub Releases over committing large tool archives into Git history.
+If you have a Windows bundle zip, upload it as a release asset named like:
+
+```text
+nexys-a7-100t-toolchain-windows.zip
+```
+
+If you are copying files manually, put the bundle or OSS CAD Suite archive in:
+
+```text
+tools-cache\
+```
+
+Setup will use that local copy before trying the network.
+
 Optional local override
 
 Only create `toolchain.local.json` if you want to override the repo defaults with your own paths or download sources.

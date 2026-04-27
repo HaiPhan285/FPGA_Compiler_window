@@ -309,7 +309,7 @@ foreach ($rtlFile in $rtlFiles) {
 )
 $ysContent += @(
     "synth_xilinx -flatten -nowidelut -abc9 -arch xc7 -top $Top"
-    "write_json \"$($json -replace '\\','/')\""
+    'write_json "{0}"' -f ($json -replace '\\','/')
 )
 $ysText = ($ysContent -join "`r`n") + "`r`n"
 Set-Content -LiteralPath $ysScript -Value $ysText -Encoding ASCII
