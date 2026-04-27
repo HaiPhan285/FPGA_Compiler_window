@@ -1,0 +1,2 @@
+tools-cache/*.zip filter=lfs diff=lfs merge=lfs -text
+tools-cache/*.exe filter=lfs diff=lfs merge=lfs -text

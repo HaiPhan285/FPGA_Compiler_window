@@ -84,6 +84,44 @@ function Get-CommonAncestor {
     return $common
 }
 
+function Get-RelativePath {
+    param(
+        [string]$BasePath,
+        [string]$PathValue
+    )
+
+    $baseFull = [System.IO.Path]::GetFullPath($BasePath).TrimEnd('\', '/')
+    $pathFull = [System.IO.Path]::GetFullPath($PathValue).TrimEnd('\', '/')
+
+    if ($pathFull.Equals($baseFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return "."
+    }
+
+    $basePrefix = $baseFull + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $pathFull.StartsWith($basePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path '$pathFull' is not under base path '$baseFull'"
+    }
+
+    return $pathFull.Substring($basePrefix.Length)
+}
+
+function Get-BundleRuntimeRelativePath {
+    param(
+        [string]$PathValue,
+        [string]$CommonRoot
+    )
+
+    $pathFull = [System.IO.Path]::GetFullPath($PathValue).TrimEnd('\', '/')
+    $parts = $pathFull -split '[\\/]'
+    for ($i = 0; $i -lt $parts.Count; $i++) {
+        if ($parts[$i].Equals("msys64", [System.StringComparison]::OrdinalIgnoreCase)) {
+            return ($parts[$i..($parts.Count - 1)] -join [System.IO.Path]::DirectorySeparatorChar)
+        }
+    }
+
+    return Get-RelativePath -BasePath $CommonRoot -PathValue $PathValue
+}
+
 function Copy-DirectoryContents {
     param(
         [string]$SourceDirectory,
@@ -159,7 +197,11 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path $root "dist\nexys-a7-100t-toolchain-windows.zip"
 }
 
-$outputFullPath = [System.IO.Path]::GetFullPath((Join-Path $root $OutputPath))
+$outputFullPath = if ([System.IO.Path]::IsPathRooted($OutputPath)) {
+    [System.IO.Path]::GetFullPath($OutputPath)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $root $OutputPath))
+}
 $outputDirectory = Split-Path -Parent $outputFullPath
 Ensure-Directory -PathValue $outputDirectory
 
@@ -223,7 +265,7 @@ try {
         $commonRoot = Get-CommonAncestor -Paths $pathExtras
         if ($commonRoot) {
             foreach ($pathEntry in $pathExtras) {
-                $relativePath = [System.IO.Path]::GetRelativePath($commonRoot, $pathEntry)
+                $relativePath = Get-BundleRuntimeRelativePath -PathValue $pathEntry -CommonRoot $commonRoot
                 $destinationPath = Join-Path $bundleRoot $relativePath
                 Write-Host "Copying runtime path $pathEntry"
                 Copy-Item -LiteralPath $pathEntry -Destination $destinationPath -Recurse -Force
