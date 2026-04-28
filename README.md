@@ -8,11 +8,12 @@ Open-source build flow for **Digilent Nexys A7-100T** on Windows without Vivado 
 git clone https://github.com/HaiPhan285/FPGA_Compiler_window.git
 cd FPGA_Compiler_window
 
-.\fpga.bat setup
-.\fpga.bat flash -Project lab
+.\fpga.bat install
+.\fpga.bat doctor
+.\fpga.bat build -Project lab2
 ```
 
-Build one project directly when you have Yosys installed:
+Build one project directly:
 
 ```powershell
 .\fpga.bat build -Project lab2
@@ -41,19 +42,38 @@ Install common MSYS2 packages:
 
 `nextpnr-xilinx` and `prjxray` are not part of the normal OSS CAD Suite Windows package. Put native openXC7/MSYS2-built binaries in `.toolchain\tools\bin` or on `PATH`.
 
-By default, `.\fpga.bat setup` stays lightweight and does not auto-download the full openXC7/prjxray bundle.
+By default, `.\fpga.bat setup` now prepares the full place-and-route / bitstream toolchain for new users.
 
-Download the full place-and-route / bitstream toolchain only when you need `.bit` generation:
+If you want to force the bundle download explicitly, you can still run:
 
 ```powershell
 .\fpga.bat setup -DownloadFullToolchain
 ```
 
+The full toolchain bundle can come from any of these sources, in this order:
+- `toolchain.json` -> `toolchainBundle.root` for a local unpacked bundle folder
+- `toolchain.json` -> `toolchainBundle.downloadUrl` plus optional `archiveName` for a direct zip download
+- `toolchain.json` -> `toolchainBundle.githubRelease` for a GitHub release asset
+
+If the configured GitHub repo has no releases, setup now reports that directly instead of failing with a raw `404`.
+
+This repo is configured to look for the bundle release tag `toolchain-bundle` and the asset `nexys-a7-100t-toolchain-windows.zip`.
+
+## Publishing The Bundle
+
+To make `git clone` + `.\fpga.bat install` work for new users, publish the Windows toolchain bundle once to this repo's `toolchain-bundle` release.
+
+Options:
+- Run the GitHub Actions workflow `.github/workflows/publish-toolchain-bundle.yml` on a self-hosted Windows runner that already has the full toolchain installed.
+- Or run `.\fpga.bat package -Force -SkipSetup` on a prepared Windows machine and upload `dist\nexys-a7-100t-toolchain-windows.zip` to the `toolchain-bundle` GitHub release.
+
 ## Commands
 
 ```powershell
 .\fpga.bat setup
-.\fpga.bat setup -DownloadFullToolchain
+.\fpga.bat install
+.\fpga.bat doctor
+.\fpga.bat package
 .\fpga.bat list
 .\fpga.bat build
 .\fpga.bat build -Project lab2
@@ -94,6 +114,8 @@ app/my_project/
 ```powershell
 .\fpga.bat build -Project my_project
 ```
+
+`setup` now expects to finish with the full bitstream build toolchain. If the download or install fails, setup exits with an error instead of leaving the user in a partial build environment.
 
 ## Project File Format
 
@@ -157,8 +179,8 @@ Then another user can clone the repo and flash a project without installing the 
 - Run `.\fpga.bat setup -InstallPackages`, or add native `yosys.exe` to `PATH`.
 
 **"nextpnr-xilinx: command not found"**
-- Synthesis can still run without it.
 - For full Nexys A7 bitstreams, install native openXC7 tools or run `.\fpga.bat setup -DownloadFullToolchain`.
+- `setup` and `build` now stop with a setup error instead of silently skipping `.bit` generation.
 
 **"chipdb-xc7a100t.bin not found"**
 - Generate or install the nextpnr-xilinx Artix-7 chip database.
@@ -172,6 +194,16 @@ Then another user can clone the repo and flash a project without installing the 
 - Check constraints file syntax
 - Verify module name is `top`
 - Check Verilog for syntax errors
+
+## Diagnostics
+
+Run this to verify whether a machine is fully ready to build:
+
+```powershell
+.\fpga.bat doctor
+```
+
+It reports missing tools, confirms whether bitstream generation is ready, and gives the next recommended command.
 
 ## References
 
