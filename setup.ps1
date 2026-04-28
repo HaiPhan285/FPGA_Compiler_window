@@ -1,17 +1,20 @@
 param(
     [switch]$Ensure,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$SkipDownload
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $stateDir = Join-Path $root ".toolchain"
 $envFile = Join-Path $stateDir "env.bat"
+$toolsDir = Join-Path $stateDir "tools"
+$localOSSCAD = Join-Path $toolsDir "oss-cad-suite"
 
 Write-Host "====== FPGA Toolchain Setup ======"
 Write-Host ""
 
-# Check for required tools in PATH
+# Check for required tools in PATH or locally
 $tools = "yosys", "nextpnr-xilinx", "python"
 $missingTools = @()
 
@@ -28,21 +31,77 @@ foreach ($tool in $tools) {
     }
     else {
         Write-Host "  [MISS] $tool : NOT FOUND" -ForegroundColor Yellow
-        $missingTools += $tool
+        if ($tool -ne "python") {
+            $missingTools += $tool
+        }
     }
+}
+
+# Python is special - let's check it more carefully
+if (-not ($tools | Where-Object { $_ -eq "python" } | ForEach-Object { Get-Command $_ -ErrorAction SilentlyContinue })) {
+    Write-Host "  [WARN] python : Consider installing Python 3.x" -ForegroundColor Yellow
 }
 
 if ($missingTools.Count -gt 0) {
     Write-Host ""
-    Write-Host "ERROR: Missing required tools: $($missingTools -join ', ')" -ForegroundColor Red
+    Write-Host "Missing tools: $($missingTools -join ', ')" -ForegroundColor Red
     Write-Host ""
-    Write-Host "How to fix:"
-    Write-Host "  1. Download OSS CAD Suite from: https://github.com/YosysHQ/oss-cad-suite"
-    Write-Host "  2. Extract it to any directory"
-    Write-Host "  3. Add the 'bin' directory to your Windows PATH environment variable"
-    Write-Host "  4. Restart PowerShell or Command Prompt"
-    Write-Host "  5. Run setup again"
+    
+    # Check if OSS CAD Suite is already locally placed
+    if (Test-Path (Join-Path $localOSSCAD "bin")) {
+        Write-Host "Found local OSS CAD Suite at: $localOSSCAD" -ForegroundColor Green
+        Write-Host "Adding to PATH..."
+        $binPath = Join-Path $localOSSCAD "bin"
+        $env:PATH = "$binPath;$env:PATH"
+    }
+    else {
+        Write-Host "Solution:" -ForegroundColor Cyan
+        Write-Host "1. Download OSS CAD Suite from:"
+        Write-Host "   https://github.com/YosysHQ/oss-cad-suite/releases"
+        Write-Host ""
+        Write-Host "2. Extract to one of these locations:"
+        Write-Host "   a) $localOSSCAD"
+        Write-Host "      (Automatic extraction location)"
+        Write-Host ""
+        Write-Host "   b) Add to Windows PATH:"
+        Write-Host "      - Win + X > System"
+        Write-Host "      - Advanced system settings > Environment Variables"
+        Write-Host "      - User variables > New"
+        Write-Host "      - Name: PATH"
+        Write-Host "      - Value: C:\oss-cad-suite\bin"
+        Write-Host "      - Restart terminal"
+        Write-Host ""
+        Write-Host "3. Run again:"
+        Write-Host "   fpga.bat setup"
+        Write-Host ""
+        exit 1
+    }
+}
+
+# Verify tools again after adding to PATH
+Write-Host ""
+Write-Host "Verifying toolchain..."
+$toolsVerified = $true
+foreach ($tool in @("yosys", "nextpnr-xilinx")) {
+    try {
+        $cmd = Get-Command $tool -ErrorAction SilentlyContinue
+        if ($cmd) {
+            Write-Host "  [OK] $tool : $($cmd.Source)"
+        }
+        else {
+            Write-Host "  [MISS] $tool : STILL NOT FOUND" -ForegroundColor Red
+            $toolsVerified = $false
+        }
+    }
+    catch {
+        Write-Host "  [ERROR] $tool : ERROR" -ForegroundColor Red
+        $toolsVerified = $false
+    }
+}
+
+if (-not $toolsVerified) {
     Write-Host ""
+    Write-Host "ERROR: Required tools still not found after setup" -ForegroundColor Red
     exit 1
 }
 
@@ -100,8 +159,8 @@ $envContent = ($envLines -join "`r`n") + "`r`n"
 Set-Content -LiteralPath $envFile -Value $envContent -Encoding ASCII
 
 Write-Host ""
-Write-Host "SUCCESS: Toolchain configured"
+Write-Host "SUCCESS: Toolchain configured" -ForegroundColor Green
 Write-Host "  Environment: $envFile"
 Write-Host ""
-Write-Host "Next: Run '.\fpga.bat build' to compile your design"
+Write-Host "Next: Run 'fpga.bat build src\my_design.sv' to compile your design"
 Write-Host ""
