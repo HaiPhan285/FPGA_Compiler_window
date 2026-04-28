@@ -1,11 +1,27 @@
-.toolchain/
-.tmp_xc7frames2bit*/
-_openxc7_src/
+# Build artifacts
 build/
-dist/
-toolchain.local.json
-tools/xc7a100t.bin
-tools-cache/*
-!tools-cache/.gitkeep
-!tools-cache/*.zip
-!tools-cache/*.exe
+*.bit
+*.bin
+*.fasm
+*.json
+*.log
+!app/**/*.bit
+
+# Tool directories
+.toolchain/
+_openxc7_src/
+
+# IDE
+.vscode/
+*.code-workspace
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
