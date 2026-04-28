@@ -55,15 +55,20 @@ exit /b %ERRORLEVEL%
 
 :ensure_toolchain
 if not exist "%SETUP_SCRIPT%" (
-  echo Missing setup script: %SETUP_SCRIPT%
+  echo ERROR: Missing setup script: %SETUP_SCRIPT%
   exit /b 1
 )
 
 powershell -ExecutionPolicy Bypass -File "%SETUP_SCRIPT%" -Ensure
-if errorlevel 1 exit /b %ERRORLEVEL%
+if errorlevel 1 (
+  echo.
+  echo ERROR: Setup failed. Run 'fpga.bat setup' to fix tool configuration.
+  exit /b %ERRORLEVEL%
+)
 
 if not exist "%ENV_FILE%" (
-  echo Toolchain environment file not found: %ENV_FILE%
+  echo ERROR: Toolchain environment file not found: %ENV_FILE%
+  echo Please run 'fpga.bat setup' first.
   exit /b 1
 )
 

@@ -65,7 +65,7 @@ function Get-RequiredEnv {
 
     $value = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrWhiteSpace($value)) {
-        throw "Missing required environment variable: $Name. Run fpga.bat build instead of calling build.ps1 directly."
+        throw "Missing required environment variable: $Name`nRun 'fpga.bat setup' first to configure the toolchain."
     }
 
     return $value
@@ -333,7 +333,8 @@ $yosysCmd = 'call "{0}" && yosys -s "{1}"' -f $ossCadEnv, $ysScript
 if ($LASTEXITCODE -ne 0) { throw "Yosys synthesis failed." }
 
 Write-Host "[2/4] nextpnr-xilinx place and route..."
-& $nextpnrExe --chipdb $chipdb --xdc $convertedXdc --json $json --fasm $fasm
+$nextpnrCmd = 'call "{0}" && "{1}" --chipdb "{2}" --xdc "{3}" --json "{4}" --fasm "{5}"' -f $ossCadEnv, $nextpnrExe, $chipdb, $convertedXdc, $json, $fasm
+& cmd.exe /c $nextpnrCmd
 if ($LASTEXITCODE -ne 0) { throw "nextpnr-xilinx failed." }
 
 Write-Host "[3/4] fasm2frames..."
@@ -341,7 +342,8 @@ Write-Host "[3/4] fasm2frames..."
 if ($LASTEXITCODE -ne 0) { throw "fasm2frames failed." }
 
 Write-Host "[4/4] xc7frames2bit..."
-& $xc7frames2bitExe --part_file $partFile --part_name $part --frm_file $frames --output_file $bit
+$xc7framesCmd = 'call "{0}" && "{1}" --part_file "{2}" --part_name "{3}" --frm_file "{4}" --output_file "{5}"' -f $ossCadEnv, $xc7frames2bitExe, $partFile, $part, $frames, $bit
+& cmd.exe /c $xc7framesCmd
 if ($LASTEXITCODE -ne 0) { throw "xc7frames2bit failed." }
 
 Write-Host ""
