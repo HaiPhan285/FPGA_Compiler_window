@@ -2,40 +2,65 @@
 
 Open-source FPGA toolchain for the Nexys A7-100T board using Yosys, nextpnr, and OpenXC7.
 
-## Quick Start
+## ⚡ Quick Start (3 Steps)
 
-### 1. Install OSS CAD Suite
-
-Download and extract the OSS CAD Suite:
-- **Download:** https://github.com/YosysHQ/oss-cad-suite/releases
-- **Extract to:** Any directory (e.g., `C:\oss-cad-suite`)
-
-### 2. Add to PATH
-
-Add the OSS CAD Suite `bin` directory to your Windows PATH:
-1. Press `Win + X` and select "System"
-2. Click "Advanced system settings"
-3. Click "Environment Variables..."
-4. Under "User variables", click "New..."
-5. Variable name: `PATH`
-6. Variable value: `C:\oss-cad-suite\bin` (or wherever you extracted it)
-7. Click OK and restart your terminal
-
-### 3. Clone and Setup
-
+### 1. Clone Repository
 ```batch
 git clone https://github.com/HaiPhan285/FPGA_Compiler_window
 cd FPGA_Compiler_window
+```
+
+### 2. Setup Toolchain
+```batch
 fpga.bat setup
 ```
 
-### 4. Build Your Design
+The setup will guide you through the process:
+- Checks for required tools (yosys, nextpnr-xilinx)
+- If missing, tells you where to get them
+- Configures your environment
 
+### 3. Build Your Design
 ```batch
-fpga.bat build
+fpga.bat build src\my_design.sv
 ```
 
-This generates `build\your_design.bit` - your FPGA bitstream.
+Done! Your bitstream is ready at `build\my_design.bit`
+
+## Installation Options
+
+### Option A: Add OSS CAD Suite to Windows PATH (Recommended for Development)
+
+**Fast & Flexible**
+
+1. Download OSS CAD Suite: https://github.com/YosysHQ/oss-cad-suite/releases
+2. Extract to any location (e.g., `C:\oss-cad-suite`)
+3. Add to PATH:
+   - Press `Win + X` → "System"
+   - "Advanced system settings" → "Environment Variables..."
+   - User variables → "New"
+   - **Name:** `PATH`
+   - **Value:** `C:\oss-cad-suite\bin` (adjust path if different)
+   - Click OK and restart terminal
+4. Run: `fpga.bat setup`
+
+### Option B: Extract to Project Directory (Offline/Portable)
+
+**Works Without PATH Changes**
+
+1. Download OSS CAD Suite: https://github.com/YosysHQ/oss-cad-suite/releases
+2. Extract to: `.toolchain\tools\oss-cad-suite`
+   - Your folder structure should look like:
+   ```
+   FPGA_Compiler_window/
+   └── .toolchain/
+       └── tools/
+           └── oss-cad-suite/
+               ├── bin/
+               ├── lib/
+               └── ...
+   ```
+3. Run: `fpga.bat setup`
 
 ## Project Structure
 
@@ -66,26 +91,25 @@ The build script auto-detects:
 
 ### Error: "Missing required tools: yosys, nextpnr-xilinx"
 
-**Fix:**
-1. Download OSS CAD Suite
-2. Add its `bin` directory to PATH
-3. Restart your terminal
-4. Run `fpga.bat setup` again
+This should NOT happen anymore. The setup script automatically downloads OSS CAD Suite when run.
+
+**If it still occurs:**
+1. Ensure you have internet connection
+2. Try again: `fpga.bat setup`
+3. If download fails, manually download from: https://github.com/YosysHQ/oss-cad-suite/releases
 
 ### Error: "Design file not found"
 
-**Fix:** Place a `.v` or `.sv` file in the `src/` directory, or specify it:
+Place a `.v` or `.sv` file in the `src/` directory, or specify it explicitly:
 ```batch
 fpga.bat build src\my_design.sv
 ```
 
 ### Build fails at nextpnr
 
-This usually means:
-- Missing chipdb database file
-- Invalid constraints file format
-
-Check that all `.xdc` files are in the `constraints/` folder.
+Usually means missing constraints or database files. Check:
+- XDC constraints file exists and is valid
+- All required files are in `src/` and `constraints/` directories
 
 ## Build Steps
 
