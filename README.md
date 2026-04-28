@@ -1,171 +1,174 @@
-# FPGA Compiler for Nexys A7-100T
+# FPGA Compiler for Native Windows
 
-Open-source FPGA toolchain for the Nexys A7-100T board using Yosys, nextpnr, and OpenXC7.
+Open-source build flow for **Digilent Nexys A7-100T** on Windows without Vivado and without WSL.
 
-## ⚡ Quick Start
+## Quick Start
 
-### **Step 1: Clone Repository**
-```batch
-git clone https://github.com/HaiPhan285/FPGA_Compiler_window
+```powershell
+git clone https://github.com/HaiPhan285/FPGA_Compiler_window.git
 cd FPGA_Compiler_window
+
+.\fpga.bat setup
+.\fpga.bat build
 ```
 
-### **Step 2: Download OSS CAD Suite**
+Build one project directly:
 
-**Option A: Automatic (Recommended)**
-```batch
-download-tools.bat
+```powershell
+.\fpga.bat build -Project blink_led
 ```
 
-**Option B: Manual**
-1. Visit: https://github.com/YosysHQ/oss-cad-suite-releases/releases
-2. Download: `oss-cad-suite-YYYY.MM.DD-windows.zip`
-3. Extract to: `.toolchain\tools\oss-cad-suite`
+## Requirements
 
-Folder structure must be:
-```
-.toolchain\tools\oss-cad-suite\
-├── bin\           ← important!
-├── lib\
-└── ...
-```
+- **Yosys** for synthesis.
+- **nextpnr-xilinx** plus a matching `chipdb-xc7a100t.bin` for place-and-route.
+- **prjxray** tools (`fasm2frames`, `xc7frames2bit`) plus `prjxray-db` for `.bit` generation.
+- **openFPGALoader** for flashing.
+- **MSYS2** is the recommended native Windows package/build environment.
 
-### **Step 3: Setup Toolchain**
-```batch
-fpga.bat setup
-```
+The scripts do not call Vivado, WSL, Ubuntu, or Bash. They discover native `.exe` tools from:
 
-### **Step 4: Build Your Design**
-```batch
-fpga.bat build src\my_design.sv
+- `.toolchain\tools\bin`
+- `C:\msys64\mingw64\bin`
+- `C:\msys64\usr\bin`
+- your normal `PATH`
+
+Install common MSYS2 packages:
+
+```powershell
+.\setup.ps1 -InstallPackages
 ```
 
-Creates: `build\my_design.bit` ✅
+`nextpnr-xilinx` and `prjxray` are not part of the normal OSS CAD Suite Windows package. Put native openXC7/MSYS2-built binaries in `.toolchain\tools\bin` or on `PATH`.
 
-### **Step 5: Program Board** (Optional)
-```batch
-fpga.bat program
+## Commands
+
+```powershell
+.\fpga.bat setup
+.\fpga.bat build
+.\fpga.bat build -Project blink_led
+.\fpga.bat build -All
+.\fpga.bat flash
+.\fpga.bat flash -Project blink_led
+.\fpga.bat flash -Bitstream build\blink_led\blink_led.bit
 ```
-
----
-
-## **What Each Command Does**
-
-| Command | Purpose |
-|---------|---------|
-| `fpga.bat setup` | Setup toolchain (one-time) |
-| `fpga.bat build <design.sv>` | Synthesize + Implement + Generate bitstream |
-| `fpga.bat program [bitstream.bit]` | Upload to board |
-
----
-
-## **Example Design**
-
-Create `src\my_design.sv`:
-```verilog
-module my_design (
-    input clk,
-    input reset,
-    output [7:0] led
-);
-
-reg [27:0] counter;
-
-always @(posedge clk) begin
-    if (reset)
-        counter <= 0;
-    else
-        counter <= counter + 1;
-end
-
-assign led = counter[27:20];
-
-endmodule
-```
-
-Then build:
-```batch
-fpga.bat build src\my_design.sv
-```
-
----
-
-## **Troubleshooting**
-
-| Problem | Solution |
-|---------|----------|
-| `yosys not found` | Run `download-tools.bat` then `fpga.bat setup` |
-| Download fails | Manual download from GitHub → Extract to `.toolchain\tools\oss-cad-suite` |
-| Extraction fails | Verify folder structure has `bin\`, `lib\`, etc. |
-| Build fails | Check design syntax in `src/`, place constraints in `constraints/` |
-| Programming fails | Check USB cable, install Digilent JTAG drivers |
-
----
-
-## **What Gets Downloaded**
-
-- **OSS CAD Suite** (~500MB) - Contains yosys, nextpnr, openFpgaLoader, etc.
-- **Location:** `.toolchain\tools\oss-cad-suite\`
-- **Can reuse:** Run `setup` multiple times, won't re-download if exists
 
 ## Project Structure
 
 ```
-.
-├── src/              # Your Verilog/SystemVerilog files
-├── constraints/      # XDC constraint files
-├── build/            # Build outputs (generated)
-├── build.ps1         # Build script
-├── setup.ps1         # Toolchain configuration script
-└── fpga.bat          # Main CLI entry point
+FPGA_Compiler_window/
+├── fpga.bat           # Windows command wrapper
+├── setup.ps1          # Native Windows environment check
+├── build.ps1          # Native Windows build flow
+├── build.sh           # Legacy Bash wrapper
+├── setup.sh           # Legacy Bash setup check
+└── app/
+    └── blink_led/     # Example project
+        ├── top.v      # Verilog source
+        └── constraints.xdc
 ```
 
-## Adding Your Design
+## Creating Your Own Project
 
-1. **Place RTL files** in `src/` (`.v` or `.sv` files)
-2. **Create constraints** file (e.g., `src/my_design.xdc`)
-3. **Run build:**
-   ```batch
-   fpga.bat build
-   ```
+1. Create a folder in `app/`:
+```powershell
+mkdir app/my_project
+```
 
-The build script auto-detects:
-- The top module (first module in your RTL)
-- The constraints file (same name as design)
+2. Add files:
+```
+app/my_project/
+├── top.v (or top.sv for SystemVerilog)
+└── constraints.xdc
+```
+
+3. Run build:
+```powershell
+.\fpga.bat build -Project my_project
+```
+
+## Project File Format
+
+### Verilog (top.v)
+```verilog
+module top (
+    input clk,
+    output led
+);
+    // Your design
+endmodule
+```
+
+### Constraints (constraints.xdc)
+```tcl
+set_property -dict {PACKAGE_PIN E3 IOSTANDARD LVCMOS33} [get_ports {clk}]
+set_property -dict {PACKAGE_PIN H17 IOSTANDARD LVCMOS33} [get_ports {led}]
+```
+
+## Build Outputs
+
+After building, outputs are in `build/` folder:
+- `project_name.json` - Synthesis output
+- `project_name.fasm` - Place & Route output (requires nextpnr-xilinx)
+- `project_name.frames` - Frame data (requires prjxray)
+- `project_name.bit` - Bitstream (requires prjxray)
+
+When `.bit` generation succeeds, the bitstream is also copied into the project folder under `app/`.
+
+## Flashing to Hardware
+
+Use openFPGALoader to flash bitstreams:
+
+```powershell
+.\fpga.bat flash
+.\fpga.bat flash -Project blink_led
+.\fpga.bat flash -Bitstream build\blink_led\blink_led.bit
+```
+
+`flash -Project <name>` uses that project's `.bit` file from `app\<name>\<name>.bit` first, then `build\<name>\<name>.bit`. Plain `flash` uses the newest `.bit` file under `app\` or `build\` when `-Bitstream` is omitted. If no `.bit` file exists, rerun the build and confirm it reaches `[OK] Bitstream complete`.
+
+For the lightest clone-and-run flow, commit or publish prebuilt bitstreams under each project folder:
+
+```text
+app/
+└── blink_led/
+    ├── top.v
+    ├── constraints.xdc
+    └── blink_led.bit
+```
+
+Then another user can clone the repo and flash a project without installing the full synthesis/place-and-route toolchain:
+
+```powershell
+.\fpga.bat flash -Project blink_led
+```
 
 ## Troubleshooting
 
-### Error: "Missing required tools: yosys, nextpnr-xilinx"
+**"yosys: command not found"**
+- Run `.\setup.ps1 -InstallPackages`, or add native `yosys.exe` to `PATH`.
 
-This should NOT happen anymore. The setup script automatically downloads OSS CAD Suite when run.
+**"nextpnr-xilinx: command not found"**
+- Synthesis can still run without it.
+- For full Nexys A7 bitstreams, build/install native openXC7 `nextpnr-xilinx.exe`.
 
-**If it still occurs:**
-1. Ensure you have internet connection
-2. Try again: `fpga.bat setup`
-3. If download fails, manually download from: https://github.com/YosysHQ/oss-cad-suite/releases
+**"chipdb-xc7a100t.bin not found"**
+- Generate or install the nextpnr-xilinx Artix-7 chip database.
+- Put it under `.toolchain\tools\share\nextpnr\xilinx\`.
 
-### Error: "Design file not found"
+**".bit generation skipped"**
+- Install native `fasm2frames.exe`, `xc7frames2bit.exe`, and `prjxray-db`.
+- Set `PRJXRAY_DB_DIR` or place the database in `.toolchain\prjxray-db`.
 
-Place a `.v` or `.sv` file in the `src/` directory, or specify it explicitly:
-```batch
-fpga.bat build src\my_design.sv
-```
+**Build failed**
+- Check constraints file syntax
+- Verify module name is `top`
+- Check Verilog for syntax errors
 
-### Build fails at nextpnr
+## References
 
-Usually means missing constraints or database files. Check:
-- XDC constraints file exists and is valid
-- All required files are in `src/` and `constraints/` directories
+- [Yosys](https://github.com/YosysHQ/yosys)
+- [nextpnr-xilinx](https://github.com/openXC7/nextpnr-xilinx)
+- [Project X-Ray](https://github.com/openXC7/prjxray)
+- [Nexys A7-100T](https://digilent.com/reference/programmable-logic/nexys-a7/reference-manual)
 
-## Build Steps
-
-The `fpga.bat build` command runs:
-
-1. **Yosys** - Synthesizes Verilog to JSON
-2. **nextpnr-xilinx** - Place and route on Xilinx 7 series
-3. **fasm2frames** - Converts routing to frame format
-4. **xc7frames2bit** - Generates final bitstream (`.bit`)
-
-## License
-
-Educational use. Based on Yosys, nextpnr, and OpenXC7 open-source projects.

@@ -1,180 +1,104 @@
+[CmdletBinding()]
 param(
-    [switch]$Ensure,
-    [switch]$Force,
-    [switch]$SkipDownload
+    [switch]$InstallPackages,
+    [switch]$PersistPath
 )
 
 $ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$stateDir = Join-Path $root ".toolchain"
-$envFile = Join-Path $stateDir "env.bat"
-$toolsDir = Join-Path $stateDir "tools"
-$localOSSCAD = Join-Path $toolsDir "oss-cad-suite"
+$RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ToolRoot = Join-Path $RepoRoot ".toolchain\tools"
+$ToolBin = Join-Path $ToolRoot "bin"
+$BuildDir = Join-Path $RepoRoot "build"
+$MsysRoot = "C:\msys64"
+$MingwBin = Join-Path $MsysRoot "mingw64\bin"
+$UsrBin = Join-Path $MsysRoot "usr\bin"
 
-Write-Host "====== FPGA Toolchain Setup ======"
-Write-Host ""
-
-# Check for required tools in PATH or locally
-$tools = "yosys", "nextpnr-xilinx", "python"
-$missingTools = @()
-
-Write-Host "Checking for required tools..."
-foreach ($tool in $tools) {
-    $found = $null
-    try {
-        $found = Get-Command $tool -ErrorAction SilentlyContinue
+function Add-PathEntry {
+    param([string]$PathEntry)
+    if ((Test-Path $PathEntry) -and (($env:Path -split ';') -notcontains $PathEntry)) {
+        $env:Path = "$PathEntry;$env:Path"
     }
-    catch { }
-    
-    if ($found) {
-        Write-Host "  [OK] $tool : $($found.Source)"
-    }
-    else {
-        Write-Host "  [MISS] $tool : NOT FOUND" -ForegroundColor Yellow
-        if ($tool -ne "python") {
-            $missingTools += $tool
+}
+
+function Find-Command {
+    param([string[]]$Names)
+    foreach ($Name in $Names) {
+        $Command = Get-Command $Name -ErrorAction SilentlyContinue
+        if ($Command) {
+            return $Command.Source
         }
     }
+    return $null
 }
 
-if (-not ($tools | Where-Object { $_ -eq "python" } | ForEach-Object { Get-Command $_ -ErrorAction SilentlyContinue })) {
-    Write-Host "  [WARN] python : Not found (optional)" -ForegroundColor Yellow
-}
+New-Item -ItemType Directory -Force -Path $ToolBin, $BuildDir | Out-Null
+Add-PathEntry $ToolBin
+Add-PathEntry $MingwBin
+Add-PathEntry $UsrBin
 
-if ($missingTools.Count -gt 0) {
-    Write-Host ""
-    Write-Host "Missing tools: $($missingTools -join ', ')" -ForegroundColor Red
-    Write-Host ""
-    
-    # Check if OSS CAD Suite is already locally placed
-    if (Test-Path (Join-Path $localOSSCAD "bin")) {
-        Write-Host "Found local OSS CAD Suite!" -ForegroundColor Green
-    }
-    else {
-        Write-Host "OSS CAD Suite not found." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "Two ways to fix this:" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "Option 1: Use download helper (recommended for first-time)"
-        Write-Host "  Run: download-tools.bat"
-        Write-Host "  Then: fpga.bat setup"
-        Write-Host ""
-        Write-Host "Option 2: Manual download"
-        Write-Host "  1. Visit: https://github.com/YosysHQ/oss-cad-suite-releases/releases"
-        Write-Host "  2. Download: oss-cad-suite-*-windows.zip"
-        Write-Host "  3. Extract to: $localOSSCAD"
-        Write-Host "  4. Run: fpga.bat setup"
-        Write-Host ""
-        exit 1
-    }
-    
-    # Add OSS CAD Suite to PATH
-    $binPath = Join-Path $localOSSCAD "bin"
-    if (Test-Path $binPath) {
-        Write-Host ""
-        Write-Host "Adding OSS CAD Suite to PATH..."
-        $env:PATH = "$binPath;$env:PATH"
-        Write-Host "  PATH updated" -ForegroundColor Green
-    }
-    else {
-        Write-Host ""
-        Write-Host "ERROR: bin directory not found in OSS CAD Suite" -ForegroundColor Red
-        Write-Host "  Expected: $binPath"
-        Write-Host ""
-        Write-Host "Verify the extraction:"
-        Write-Host "  Should contain: $localOSSCAD\bin\"
-        Write-Host ""
-        exit 1
-    }
-}
-
-# Verify tools again after adding to PATH
 Write-Host ""
-Write-Host "Verifying tools..."
-$toolsVerified = $true
-foreach ($tool in @("yosys", "nextpnr-xilinx")) {
-    try {
-        $cmd = Get-Command $tool -ErrorAction SilentlyContinue
-        if ($cmd) {
-            Write-Host "  [OK] $tool"
-        }
-        else {
-            Write-Host "  [MISS] $tool : NOT FOUND" -ForegroundColor Red
-            $toolsVerified = $false
+Write-Host "====== FPGA Compiler Setup: native Windows ======"
+Write-Host ""
+
+if ($InstallPackages) {
+    $Pacman = Join-Path $UsrBin "pacman.exe"
+    if (-not (Test-Path $Pacman)) {
+        throw "MSYS2 was not found at $MsysRoot. Install MSYS2 from https://www.msys2.org, then rerun setup."
+    }
+
+    Write-Host "Installing MSYS2 packages used by the open-source FPGA flow..."
+    & $Pacman -S --noconfirm --needed `
+        git base-devel make cmake python python-pip pkgconf `
+        mingw-w64-x86_64-toolchain `
+        mingw-w64-x86_64-cmake `
+        mingw-w64-x86_64-python `
+        mingw-w64-x86_64-boost `
+        mingw-w64-x86_64-eigen3 `
+        mingw-w64-x86_64-yosys `
+        mingw-w64-x86_64-openFPGALoader
+}
+
+if ($PersistPath) {
+    $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    foreach ($Entry in @($ToolBin, $MingwBin, $UsrBin)) {
+        if ((Test-Path $Entry) -and (($UserPath -split ';') -notcontains $Entry)) {
+            $UserPath = "$Entry;$UserPath"
         }
     }
-    catch {
-        Write-Host "  [ERROR] $tool" -ForegroundColor Red
-        $toolsVerified = $false
+    [Environment]::SetEnvironmentVariable("Path", $UserPath, "User")
+    Write-Host "Updated user PATH. Open a new terminal for persistent PATH changes."
+}
+
+$Checks = [ordered]@{
+    "yosys" = @(Find-Command @("yosys.exe", "yosys"))
+    "nextpnr-xilinx" = @(Find-Command @("nextpnr-xilinx.exe", "nextpnr-xilinx"))
+    "fasm2frames" = @(Find-Command @("fasm2frames.exe", "fasm2frames"))
+    "xc7frames2bit" = @(Find-Command @("xc7frames2bit.exe", "xc7frames2bit"))
+    "openFPGALoader" = @(Find-Command @("openFPGALoader.exe", "openFPGALoader"))
+    "python" = @(Find-Command @("python.exe", "python", "python3.exe", "python3"))
+}
+
+$Missing = @()
+foreach ($Item in $Checks.GetEnumerator()) {
+    $Found = $Item.Value | Select-Object -First 1
+    if ($Found) {
+        Write-Host ("[OK]   {0}: {1}" -f $Item.Key, $Found)
+    } else {
+        Write-Host ("[MISS] {0}" -f $Item.Key)
+        $Missing += $Item.Key
     }
 }
 
-if (-not $toolsVerified) {
-    Write-Host ""
-    Write-Host "ERROR: Tools still not accessible" -ForegroundColor Red
-    Write-Host "Troubleshooting:" -ForegroundColor Yellow
-    Write-Host "  1. Check OSS CAD Suite extraction"
-    Write-Host "  2. Verify 'bin' folder exists at: $binPath"
-    Write-Host "  3. Restart terminal and try again"
-    Write-Host ""
-    exit 1
-}
-
-# Create toolchain directory
-if (-not (Test-Path $stateDir)) {
-    New-Item -ItemType Directory -Path $stateDir | Out-Null
-}
-
-# Find tools and resource files
-$yosysCmd = Get-Command yosys -ErrorAction SilentlyContinue
-$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-$nextpnrCmd = Get-Command nextpnr-xilinx -ErrorAction SilentlyContinue
-
-$yosysExe = if ($yosysCmd) { $yosysCmd.Source } else { "" }
-$pythonExe = if ($pythonCmd) { $pythonCmd.Source } else { "" }
-$nextpnrExe = if ($nextpnrCmd) { $nextpnrCmd.Source } else { "" }
-
-$chipdb = Get-ChildItem -Path $root -Recurse -Filter "*xc7a100t*.bin" -ErrorAction SilentlyContinue | Select-Object -First 1
-$partYaml = Get-ChildItem -Path $root -Recurse -Filter "part.yaml" -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*xc7a100tcsg324-1*" } | Select-Object -First 1
-$xc7frames2bit = Get-ChildItem -Path $root -Recurse -Filter "xc7frames2bit.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-$ossCadEnv = Get-ChildItem -Path $root -Recurse -Filter "environment.bat" -ErrorAction SilentlyContinue | Select-Object -First 1
-
-$envLines = @("@echo off")
-$envLines += "set `"PART=xc7a100tcsg324-1`""
-$envLines += "set `"YOSYS_EXE=$yosysExe`""
-$envLines += "set `"PYTHON_EXE=$pythonExe`""
-$envLines += "set `"NEXTPNR_EXE=$nextpnrExe`""
-
-if ($chipdb) {
-    $envLines += "set `"CHIPDB=$($chipdb.FullName)`""
-}
-
-if ($partYaml) {
-    $xrayDbRoot = Split-Path -Parent (Split-Path -Parent $partYaml.FullName)
-    $envLines += "set `"XRAY_DB_ROOT=$xrayDbRoot`""
-    $envLines += "set `"PART_FILE=$($partYaml.FullName)`""
-    
-    $prjxrayUtils = Join-Path $xrayDbRoot "prjxray\utils"
-    if (Test-Path $prjxrayUtils) {
-        $envLines += "set `"PRJXRAY_UTILS=$prjxrayUtils`""
-    }
-}
-
-if ($xc7frames2bit) {
-    $envLines += "set `"XC7FRAMES2BIT_EXE=$($xc7frames2bit.FullName)`""
-}
-
-if ($ossCadEnv) {
-    $envLines += "set `"OSS_CAD_ENV=$($ossCadEnv.FullName)`""
-}
-
-$envContent = ($envLines -join "`r`n") + "`r`n"
-Set-Content -LiteralPath $envFile -Value $envContent -Encoding ASCII
-
 Write-Host ""
-Write-Host "SUCCESS: Toolchain configured" -ForegroundColor Green
-Write-Host "  Environment: $envFile"
-Write-Host "  OSS CAD Suite: $localOSSCAD"
+if ($Missing.Count -eq 0) {
+    Write-Host "Setup complete. Run: .\fpga.bat build"
+    exit 0
+}
+
+Write-Host "Missing tools: $($Missing -join ', ')"
 Write-Host ""
-Write-Host "Next: fpga.bat build src\my_design.sv"
-Write-Host ""
+Write-Host "Windows-native target:"
+Write-Host "  - Yosys can be installed from MSYS2 with: .\setup.ps1 -InstallPackages"
+Write-Host "  - nextpnr-xilinx/prjxray are the hard part; use native openXC7/MSYS2-built binaries and put them on PATH or in .toolchain\tools\bin."
+Write-Host "  - Vivado and WSL are not required by these scripts."
+exit 1

@@ -1,111 +1,47 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableDelayedExpansion
 
-if "%~1"=="" goto :usage
-
+set "SCRIPT_DIR=%~dp0"
 set "COMMAND=%~1"
-shift
+if "%COMMAND%"=="" goto help
+shift /1
+set "ARGS="
 
-set "ROOT=%~dp0"
-if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
-set "SETUP_SCRIPT=%ROOT%\setup.ps1"
-set "PACKAGE_TOOLCHAIN_SCRIPT=%ROOT%\package-toolchain.ps1"
-set "ENV_FILE=%ROOT%\.toolchain\env.bat"
-
-if /I "%COMMAND%"=="setup" goto :setup
-if /I "%COMMAND%"=="install" goto :setup
-if /I "%COMMAND%"=="bundle" goto :bundle
-if /I "%COMMAND%"=="package-toolchain" goto :bundle
-
-call :ensure_toolchain || exit /b 1
-call "%ENV_FILE%" || exit /b 1
-
-if /I "%COMMAND%"=="build" goto :build
-if /I "%COMMAND%"=="program" goto :program
-if /I "%COMMAND%"=="prog" goto :program
-
-echo Unknown command: %COMMAND%
-goto :usage
-
-:setup
-set "SETUP_FORCE="
-if /I "%~1"=="--force" set "SETUP_FORCE=-Force"
-if /I "%~1"=="/force" set "SETUP_FORCE=-Force"
-powershell -ExecutionPolicy Bypass -File "%SETUP_SCRIPT%" -Ensure %SETUP_FORCE%
-exit /b %ERRORLEVEL%
-
-:bundle
-set "BUNDLE_OUTPUT="
-set "PACKAGE_FORCE="
-if /I "%~1"=="--force" (
-  set "PACKAGE_FORCE=-Force"
-) else if /I "%~1"=="/force" (
-  set "PACKAGE_FORCE=-Force"
+:collect_args
+if "%~1"=="" goto dispatch
+if defined ARGS (
+  set "ARGS=%ARGS% "%~1""
 ) else (
-  set "BUNDLE_OUTPUT=%~1"
+  set "ARGS="%~1""
 )
-if /I "%~2"=="--force" set "PACKAGE_FORCE=-Force"
-if /I "%~2"=="/force" set "PACKAGE_FORCE=-Force"
-if defined BUNDLE_OUTPUT (
-  powershell -ExecutionPolicy Bypass -File "%PACKAGE_TOOLCHAIN_SCRIPT%" -OutputPath "%BUNDLE_OUTPUT%" %PACKAGE_FORCE%
-) else (
-  powershell -ExecutionPolicy Bypass -File "%PACKAGE_TOOLCHAIN_SCRIPT%" %PACKAGE_FORCE%
-)
-exit /b %ERRORLEVEL%
+shift /1
+goto collect_args
 
-:ensure_toolchain
-if not exist "%SETUP_SCRIPT%" (
-  echo ERROR: Missing setup script: %SETUP_SCRIPT%
-  exit /b 1
+:dispatch
+if /I "%COMMAND%"=="setup" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%setup.ps1" %ARGS%
+  exit /b !ERRORLEVEL!
 )
 
-powershell -ExecutionPolicy Bypass -File "%SETUP_SCRIPT%" -Ensure
-if errorlevel 1 (
-  echo.
-  echo ERROR: Setup failed. Run 'fpga.bat setup' to fix tool configuration.
-  exit /b %ERRORLEVEL%
+if /I "%COMMAND%"=="build" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%build.ps1" %ARGS%
+  exit /b !ERRORLEVEL!
 )
 
-if not exist "%ENV_FILE%" (
-  echo ERROR: Toolchain environment file not found: %ENV_FILE%
-  echo Please run 'fpga.bat setup' first.
-  exit /b 1
+if /I "%COMMAND%"=="flash" (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%build.ps1" -Flash %ARGS%
+  exit /b !ERRORLEVEL!
 )
 
-exit /b 0
-
-:build
-powershell -ExecutionPolicy Bypass -File "%ROOT%\build.ps1" "%~1" "%~2" "%~3"
-exit /b %ERRORLEVEL%
-
-:program
-set "BIT=%~1"
-if not defined BIT set "BIT=%ROOT%\build\your_design.bit"
-if not exist "%BIT%" (
-  echo Bitstream not found: %BIT%
-  exit /b 1
-)
-
-echo Programming bitstream: %BIT%
-echo Using programmer: %OPENFPGALOADER_EXE%
-echo Cable: %OPENFPGALOADER_CABLE%
-call "%OSS_CAD_ENV%" >nul 2>&1 || exit /b 1
-rem Nexys A7 uses the Digilent FT2232 JTAG interface; generic FT2232 mode can fail to detect the JTAG chain.
-"%OPENFPGALOADER_EXE%" -c "%OPENFPGALOADER_CABLE%" "%BIT%"
-set "PROGRAM_EXIT=%ERRORLEVEL%"
-if not "%PROGRAM_EXIT%"=="0" (
-  echo Programming failed with exit code %PROGRAM_EXIT%.
-  exit /b %PROGRAM_EXIT%
-)
-
-echo Programming completed.
-exit /b 0
-
-:usage
+:help
+echo FPGA Compiler for native Windows
+echo.
 echo Usage:
-echo   %~nx0 install [--force]
-echo   %~nx0 setup [--force]
-echo   %~nx0 bundle [output.zip] [--force]
-echo   %~nx0 build ^<design.sv^> [top] [constraints.xdc]
-echo   %~nx0 program [build\design.bit]
+echo   fpga.bat setup
+echo   fpga.bat build
+echo   fpga.bat build -Project blink_led
+echo   fpga.bat flash
+echo   fpga.bat flash -Project blink_led
+echo   fpga.bat flash -Bitstream build\blink_led\blink_led.bit
+echo.
 exit /b 1
