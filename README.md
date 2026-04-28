@@ -10,57 +10,28 @@ git clone https://github.com/HaiPhan285/FPGA_Compiler_window
 cd FPGA_Compiler_window
 ```
 
-### 2. Setup Toolchain
+### 2. Download & Setup Toolchain
 ```batch
+# Option A: Auto-download (if internet is stable)
 fpga.bat setup
+
+# Option B: Manual download (for reliable/offline setup)
+# 1. Download: https://github.com/YosysHQ/oss-cad-suite-releases/releases
+# 2. Extract to: .toolchain\tools\oss-cad-suite
+# 3. Run: fpga.bat setup
 ```
 
-The setup will guide you through the process:
-- Checks for required tools (yosys, nextpnr-xilinx)
-- If missing, tells you where to get them
-- Configures your environment
+The setup script will:
+- Check for required tools (yosys, nextpnr-xilinx)
+- Auto-download OSS CAD Suite if tools missing
+- Configure your toolchain environment
 
 ### 3. Build Your Design
 ```batch
 fpga.bat build src\my_design.sv
 ```
 
-Done! Your bitstream is ready at `build\my_design.bit`
-
-## Installation Options
-
-### Option A: Add OSS CAD Suite to Windows PATH (Recommended for Development)
-
-**Fast & Flexible**
-
-1. Download OSS CAD Suite: https://github.com/YosysHQ/oss-cad-suite/releases
-2. Extract to any location (e.g., `C:\oss-cad-suite`)
-3. Add to PATH:
-   - Press `Win + X` → "System"
-   - "Advanced system settings" → "Environment Variables..."
-   - User variables → "New"
-   - **Name:** `PATH`
-   - **Value:** `C:\oss-cad-suite\bin` (adjust path if different)
-   - Click OK and restart terminal
-4. Run: `fpga.bat setup`
-
-### Option B: Extract to Project Directory (Offline/Portable)
-
-**Works Without PATH Changes**
-
-1. Download OSS CAD Suite: https://github.com/YosysHQ/oss-cad-suite/releases
-2. Extract to: `.toolchain\tools\oss-cad-suite`
-   - Your folder structure should look like:
-   ```
-   FPGA_Compiler_window/
-   └── .toolchain/
-       └── tools/
-           └── oss-cad-suite/
-               ├── bin/
-               ├── lib/
-               └── ...
-   ```
-3. Run: `fpga.bat setup`
+Your bitstream is ready at `build\my_design.bit` 🎉
 
 ## Project Structure
 
