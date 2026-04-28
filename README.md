@@ -9,13 +9,13 @@ git clone https://github.com/HaiPhan285/FPGA_Compiler_window.git
 cd FPGA_Compiler_window
 
 .\fpga.bat setup
-.\fpga.bat build
+.\fpga.bat flash -Project lab
 ```
 
-Build one project directly:
+Build one project directly when you have Yosys installed:
 
 ```powershell
-.\fpga.bat build -Project blink_led
+.\fpga.bat build -Project lab2
 ```
 
 ## Requirements
@@ -36,35 +36,43 @@ The scripts do not call Vivado, WSL, Ubuntu, or Bash. They discover native `.exe
 Install common MSYS2 packages:
 
 ```powershell
-.\setup.ps1 -InstallPackages
+.\fpga.bat setup -InstallPackages
 ```
 
 `nextpnr-xilinx` and `prjxray` are not part of the normal OSS CAD Suite Windows package. Put native openXC7/MSYS2-built binaries in `.toolchain\tools\bin` or on `PATH`.
+
+By default, `.\fpga.bat setup` stays lightweight and does not auto-download the full openXC7/prjxray bundle.
+
+Download the full place-and-route / bitstream toolchain only when you need `.bit` generation:
+
+```powershell
+.\fpga.bat setup -DownloadFullToolchain
+```
 
 ## Commands
 
 ```powershell
 .\fpga.bat setup
+.\fpga.bat setup -DownloadFullToolchain
+.\fpga.bat list
 .\fpga.bat build
-.\fpga.bat build -Project blink_led
+.\fpga.bat build -Project lab2
 .\fpga.bat build -All
 .\fpga.bat flash
-.\fpga.bat flash -Project blink_led
-.\fpga.bat flash -Bitstream build\blink_led\blink_led.bit
+.\fpga.bat flash -Project lab
+.\fpga.bat flash -Bitstream build\lab\lab.bit
 ```
 
 ## Project Structure
 
 ```
 FPGA_Compiler_window/
-├── fpga.bat           # Windows command wrapper
-├── setup.ps1          # Native Windows environment check
-├── build.ps1          # Native Windows build flow
-├── build.sh           # Legacy Bash wrapper
-├── setup.sh           # Legacy Bash setup check
+├── fpga.bat           # Simple Windows launcher
+├── fpga.ps1           # Single PowerShell entrypoint
 └── app/
-    └── blink_led/     # Example project
-        ├── top.v      # Verilog source
+    ├── lab/           # Prebuilt bitstream example
+    └── lab2/          # Source-only example
+        ├── add.v
         └── constraints.xdc
 ```
 
@@ -121,8 +129,8 @@ Use openFPGALoader to flash bitstreams:
 
 ```powershell
 .\fpga.bat flash
-.\fpga.bat flash -Project blink_led
-.\fpga.bat flash -Bitstream build\blink_led\blink_led.bit
+.\fpga.bat flash -Project lab
+.\fpga.bat flash -Bitstream build\lab\lab.bit
 ```
 
 `flash -Project <name>` uses that project's `.bit` file from `app\<name>\<name>.bit` first, then `build\<name>\<name>.bit`. Plain `flash` uses the newest `.bit` file under `app\` or `build\` when `-Bitstream` is omitted. If no `.bit` file exists, rerun the build and confirm it reaches `[OK] Bitstream complete`.
@@ -131,26 +139,26 @@ For the lightest clone-and-run flow, commit or publish prebuilt bitstreams under
 
 ```text
 app/
-└── blink_led/
+└── lab/
     ├── top.v
     ├── constraints.xdc
-    └── blink_led.bit
+    └── lab.bit
 ```
 
 Then another user can clone the repo and flash a project without installing the full synthesis/place-and-route toolchain:
 
 ```powershell
-.\fpga.bat flash -Project blink_led
+.\fpga.bat flash -Project lab
 ```
 
 ## Troubleshooting
 
 **"yosys: command not found"**
-- Run `.\setup.ps1 -InstallPackages`, or add native `yosys.exe` to `PATH`.
+- Run `.\fpga.bat setup -InstallPackages`, or add native `yosys.exe` to `PATH`.
 
 **"nextpnr-xilinx: command not found"**
 - Synthesis can still run without it.
-- For full Nexys A7 bitstreams, build/install native openXC7 `nextpnr-xilinx.exe`.
+- For full Nexys A7 bitstreams, install native openXC7 tools or run `.\fpga.bat setup -DownloadFullToolchain`.
 
 **"chipdb-xc7a100t.bin not found"**
 - Generate or install the nextpnr-xilinx Artix-7 chip database.

@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$setupScript = Join-Path $root "setup.ps1"
+$setupScript = Join-Path $root "fpga.ps1"
 $envFile = Join-Path $root ".toolchain\env.bat"
 
 function Ensure-Directory {
@@ -159,7 +159,7 @@ if (-not (Test-Path -LiteralPath $setupScript)) {
     throw "Missing setup script: $setupScript"
 }
 
-& powershell -ExecutionPolicy Bypass -File $setupScript -Ensure
+& powershell -ExecutionPolicy Bypass -File $setupScript setup -Ensure -DownloadFullToolchain
 if ($LASTEXITCODE -ne 0) {
     throw "Toolchain setup failed with exit code $LASTEXITCODE"
 }
