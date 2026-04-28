@@ -2,36 +2,111 @@
 
 Open-source FPGA toolchain for the Nexys A7-100T board using Yosys, nextpnr, and OpenXC7.
 
-## ⚡ Quick Start (3 Steps)
+## ⚡ Quick Start
 
-### 1. Clone Repository
+### **Step 1: Clone Repository**
 ```batch
 git clone https://github.com/HaiPhan285/FPGA_Compiler_window
 cd FPGA_Compiler_window
 ```
 
-### 2. Download & Setup Toolchain
-```batch
-# Option A: Auto-download (if internet is stable)
-fpga.bat setup
+### **Step 2: Download OSS CAD Suite**
 
-# Option B: Manual download (for reliable/offline setup)
-# 1. Download: https://github.com/YosysHQ/oss-cad-suite-releases/releases
-# 2. Extract to: .toolchain\tools\oss-cad-suite
-# 3. Run: fpga.bat setup
+**Option A: Automatic (Recommended)**
+```batch
+download-tools.bat
 ```
 
-The setup script will:
-- Check for required tools (yosys, nextpnr-xilinx)
-- Auto-download OSS CAD Suite if tools missing
-- Configure your toolchain environment
+**Option B: Manual**
+1. Visit: https://github.com/YosysHQ/oss-cad-suite-releases/releases
+2. Download: `oss-cad-suite-YYYY.MM.DD-windows.zip`
+3. Extract to: `.toolchain\tools\oss-cad-suite`
 
-### 3. Build Your Design
+Folder structure must be:
+```
+.toolchain\tools\oss-cad-suite\
+├── bin\           ← important!
+├── lib\
+└── ...
+```
+
+### **Step 3: Setup Toolchain**
+```batch
+fpga.bat setup
+```
+
+### **Step 4: Build Your Design**
 ```batch
 fpga.bat build src\my_design.sv
 ```
 
-Your bitstream is ready at `build\my_design.bit` 🎉
+Creates: `build\my_design.bit` ✅
+
+### **Step 5: Program Board** (Optional)
+```batch
+fpga.bat program
+```
+
+---
+
+## **What Each Command Does**
+
+| Command | Purpose |
+|---------|---------|
+| `fpga.bat setup` | Setup toolchain (one-time) |
+| `fpga.bat build <design.sv>` | Synthesize + Implement + Generate bitstream |
+| `fpga.bat program [bitstream.bit]` | Upload to board |
+
+---
+
+## **Example Design**
+
+Create `src\my_design.sv`:
+```verilog
+module my_design (
+    input clk,
+    input reset,
+    output [7:0] led
+);
+
+reg [27:0] counter;
+
+always @(posedge clk) begin
+    if (reset)
+        counter <= 0;
+    else
+        counter <= counter + 1;
+end
+
+assign led = counter[27:20];
+
+endmodule
+```
+
+Then build:
+```batch
+fpga.bat build src\my_design.sv
+```
+
+---
+
+## **Troubleshooting**
+
+| Problem | Solution |
+|---------|----------|
+| `yosys not found` | Run `download-tools.bat` then `fpga.bat setup` |
+| Download fails | Manual download from GitHub → Extract to `.toolchain\tools\oss-cad-suite` |
+| Extraction fails | Verify folder structure has `bin\`, `lib\`, etc. |
+| Build fails | Check design syntax in `src/`, place constraints in `constraints/` |
+| Programming fails | Check USB cable, install Digilent JTAG drivers |
+
+---
+
+## **What Gets Downloaded**
+
+- **OSS CAD Suite** (~500MB) - Contains yosys, nextpnr, openFpgaLoader, etc.
+- **Location:** `.toolchain\tools\oss-cad-suite\`
+- **Can reuse:** Run `setup` multiple times, won't re-download if exists
 
 ## Project Structure
 
