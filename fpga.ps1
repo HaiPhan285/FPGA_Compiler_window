@@ -11,6 +11,10 @@ param(
     [switch]$InstallPackages,
     [switch]$PersistPath,
     [switch]$Ensure,
+    [switch]$Force,
+    [string]$OutputPath = "",
+    [switch]$SkipChipDb,
+    [switch]$SkipSetup,
     [switch]$DownloadFullToolchain,
     [switch]$RequireFullBuildTools,
     [string]$Device = "xc7a100t",
@@ -18,6 +22,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ScriptPath = $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ToolRoot = Join-Path $RepoRoot ".toolchain\tools"
 $ToolBin = Join-Path $ToolRoot "bin"
@@ -82,7 +87,15 @@ function Get-GitHubReleaseAsset {
         "tags/$($ReleaseConfig.tag)"
     }
     $Uri = "https://api.github.com/repos/$($ReleaseConfig.repo)/releases/$Tag"
-    $Release = Invoke-RestMethod -Uri $Uri -Headers @{ "User-Agent" = "FPGA-Compiler-Setup" }
+    try {
+        $Release = Invoke-RestMethod -Uri $Uri -Headers @{ "User-Agent" = "FPGA-Compiler-Setup" }
+    } catch {
+        $StatusCode = $_.Exception.Response.StatusCode.value__
+        if ($StatusCode -eq 404) {
+            throw "GitHub release not found for $($ReleaseConfig.repo) ($Tag). Publish a release asset or configure toolchainBundle.downloadUrl/toolchainBundle.root."
+        }
+        throw
+    }
     $Patterns = @($ReleaseConfig.assetPatterns)
     if ($Patterns.Count -eq 0) { $Patterns = @("*.zip") }
 
@@ -90,12 +103,39 @@ function Get-GitHubReleaseAsset {
         $Asset = @($Release.assets | Where-Object { $_.name -like $Pattern } | Sort-Object name | Select-Object -First 1)
         if ($Asset.Count -gt 0) { return $Asset[0] }
     }
-    return $null
+
+    throw "No release asset matched $($Patterns -join ', ') in $($ReleaseConfig.repo) ($Tag). Publish the bundle with one of those names or configure toolchainBundle.downloadUrl."
+}
+
+function Expand-ArchiveToOpenXc7Root {
+    param([string]$ArchivePath)
+
+    $ExtractRoot = Join-Path $ToolRoot "_openxc7_extract"
+    if (Test-Path -LiteralPath $ExtractRoot) { Remove-Item -LiteralPath $ExtractRoot -Recurse -Force }
+    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $ExtractRoot -Force
+
+    $CandidateRoots = @($ExtractRoot) + @(Get-ChildItem -Path $ExtractRoot -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+    $DetectedRoot = $CandidateRoots | Where-Object { Test-Path (Join-Path $_ "nextpnr-xilinx.exe") } | Select-Object -First 1
+    if (-not $DetectedRoot) { throw "Downloaded bundle did not contain nextpnr-xilinx.exe." }
+
+    if (Test-Path -LiteralPath $OpenXc7Root) { Remove-Item -LiteralPath $OpenXc7Root -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $OpenXc7Root | Out-Null
+    Copy-Item -LiteralPath (Join-Path $DetectedRoot "*") -Destination $OpenXc7Root -Recurse -Force
+    Remove-Item -LiteralPath $ExtractRoot -Recurse -Force
 }
 
 function Install-OpenXc7Bundle {
+    param([switch]$Force)
     $Config = Get-ToolchainConfig
-    if (-not $Config -or -not ($Config.autoDownload -or $DownloadFullToolchain -or $Ensure -or $RequireFullBuildTools)) { return }
+    if (-not $Config -or -not ($Config.autoDownload -or $DownloadFullToolchain -or $Ensure -or $RequireFullBuildTools -or $Force)) { return }
+
+    if ((Find-CommandPath @("nextpnr-xilinx.exe", "nextpnr-xilinx")) -and
+        (Find-CommandPath @("fasm2frames.exe", "fasm2frames")) -and
+        (Find-CommandPath @("xc7frames2bit.exe", "xc7frames2bit")) -and
+        (Find-ChipDb $Device) -and
+        (Find-PrjxrayDb)) {
+        return
+    }
 
     if ((Test-Path (Join-Path $OpenXc7Root "nextpnr-xilinx.exe")) -and
         (Test-Path (Join-Path $OpenXc7Root "build\prjxray\tools\xc7frames2bit.exe"))) {
@@ -109,29 +149,30 @@ function Install-OpenXc7Bundle {
         return
     }
 
-    $Asset = Get-GitHubReleaseAsset $Config.toolchainBundle.githubRelease
-    if (-not $Asset) {
-        Write-Host "No openXC7 toolchain release asset found for auto-download."
+    $BundleDownloadUrl = $Config.toolchainBundle.downloadUrl
+    if (-not [string]::IsNullOrWhiteSpace($BundleDownloadUrl)) {
+        New-Item -ItemType Directory -Force -Path $ToolRoot | Out-Null
+        $ArchiveName = $Config.toolchainBundle.archiveName
+        if ([string]::IsNullOrWhiteSpace($ArchiveName)) {
+            try {
+                $ArchiveName = [System.IO.Path]::GetFileName(([System.Uri]$BundleDownloadUrl).AbsolutePath)
+            } catch {
+                $ArchiveName = "openxc7-toolchain.zip"
+            }
+        }
+        $ArchivePath = Join-Path $ToolRoot $ArchiveName
+        Write-Host "Downloading openXC7 toolchain bundle: $BundleDownloadUrl"
+        Invoke-WebRequest -Uri $BundleDownloadUrl -OutFile $ArchivePath
+        Expand-ArchiveToOpenXc7Root -ArchivePath $ArchivePath
         return
     }
 
+    $Asset = Get-GitHubReleaseAsset $Config.toolchainBundle.githubRelease
     New-Item -ItemType Directory -Force -Path $ToolRoot | Out-Null
     $ArchivePath = Join-Path $ToolRoot $Asset.name
-    $ExtractRoot = Join-Path $ToolRoot "_openxc7_extract"
-
     Write-Host "Downloading openXC7 toolchain bundle: $($Asset.name)"
     Invoke-WebRequest -Uri $Asset.browser_download_url -OutFile $ArchivePath
-    if (Test-Path -LiteralPath $ExtractRoot) { Remove-Item -LiteralPath $ExtractRoot -Recurse -Force }
-    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $ExtractRoot -Force
-
-    $CandidateRoots = @($ExtractRoot) + @(Get-ChildItem -Path $ExtractRoot -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
-    $DetectedRoot = $CandidateRoots | Where-Object { Test-Path (Join-Path $_ "nextpnr-xilinx.exe") } | Select-Object -First 1
-    if (-not $DetectedRoot) { throw "Downloaded bundle did not contain nextpnr-xilinx.exe." }
-
-    if (Test-Path -LiteralPath $OpenXc7Root) { Remove-Item -LiteralPath $OpenXc7Root -Recurse -Force }
-    New-Item -ItemType Directory -Force -Path $OpenXc7Root | Out-Null
-    Copy-Item -LiteralPath (Join-Path $DetectedRoot "*") -Destination $OpenXc7Root -Recurse -Force
-    Remove-Item -LiteralPath $ExtractRoot -Recurse -Force
+    Expand-ArchiveToOpenXc7Root -ArchivePath $ArchivePath
 }
 
 function Write-CommandShim {
@@ -159,6 +200,170 @@ function Install-OpenXc7Shims {
     }
 }
 
+function Get-OssCadRoot {
+    $Config = Get-ToolchainConfig
+    $ConfiguredRoot = $null
+    if ($Config -and $Config.ossCadSuite) {
+        $ConfiguredRoot = Expand-ConfigPath $Config.ossCadSuite.root
+    }
+
+    foreach ($Candidate in @(
+        $ConfiguredRoot,
+        (Join-Path $OpenXc7Root "oss-cad-suite"),
+        (Join-Path $ToolRoot "oss-cad-suite")
+    ) | Where-Object { $_ }) {
+        if (Test-Path -LiteralPath $Candidate) {
+            return (Resolve-Path -LiteralPath $Candidate).Path
+        }
+    }
+
+    return $null
+}
+
+function Write-ToolchainEnv {
+    $EnvFile = Join-Path $RepoRoot ".toolchain\env.bat"
+    $NextpnrExe = Find-CommandPath @("nextpnr-xilinx.exe", "nextpnr-xilinx")
+    $Fasm2Frames = Find-CommandPath @("fasm2frames.exe", "fasm2frames")
+    $Frames2Bit = Find-CommandPath @("xc7frames2bit.exe", "xc7frames2bit")
+    $ChipDbPath = Find-ChipDb $Device
+    $PrjxrayDbRoot = Find-PrjxrayDb
+    $PrjxrayUtils = $null
+    foreach ($Candidate in @(
+        (Join-Path $OpenXc7Root "src\prjxray\utils"),
+        (Join-Path $RepoRoot "_openxc7_src\prjxray\utils")
+    )) {
+        if (Test-Path -LiteralPath $Candidate) {
+            $PrjxrayUtils = (Resolve-Path -LiteralPath $Candidate).Path
+            break
+        }
+    }
+
+    $Values = [ordered]@{
+        "OSS_CAD" = Get-OssCadRoot
+        "NEXTPNR_EXE" = $NextpnrExe
+        "PRJXRAY_UTILS" = $PrjxrayUtils
+        "XRAY_DB_ROOT" = if ($PrjxrayDbRoot) { Join-Path $PrjxrayDbRoot "artix7" } else { $null }
+        "XC7FRAMES2BIT_EXE" = $Frames2Bit
+        "FASM2FRAMES_EXE" = $Fasm2Frames
+        "CHIPDB" = $ChipDbPath
+        "PATH" = (@($ToolBin, $OpenXc7Root, (Join-Path $OpenXc7Root "oss-cad-suite\bin"), (Join-Path $OpenXc7Root "build\prjxray\tools"), $MingwBin, $UsrBin) | Where-Object { Test-Path $_ }) -join ';'
+    }
+
+    $Lines = @("@echo off")
+    foreach ($Item in $Values.GetEnumerator()) {
+        if (-not [string]::IsNullOrWhiteSpace($Item.Value)) {
+            $Lines += "set `"$($Item.Key)=$($Item.Value)`""
+        }
+    }
+
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $EnvFile) | Out-Null
+    Set-Content -LiteralPath $EnvFile -Value $Lines -Encoding ASCII
+}
+
+function Ensure-Directory {
+    param([string]$PathValue)
+    if (-not (Test-Path -LiteralPath $PathValue)) {
+        New-Item -ItemType Directory -Path $PathValue | Out-Null
+    }
+}
+
+function Remove-DirectoryIfExists {
+    param([string]$PathValue)
+    if ($PathValue -and (Test-Path -LiteralPath $PathValue)) {
+        Remove-Item -LiteralPath $PathValue -Recurse -Force
+    }
+}
+
+function New-TemporaryDirectory {
+    $PathValue = Join-Path ([System.IO.Path]::GetTempPath()) ("fpga-bundle-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $PathValue | Out-Null
+    return $PathValue
+}
+
+function Get-BatchEnvironmentValues {
+    param([string]$FilePath)
+    $Values = @{}
+    foreach ($Line in Get-Content -LiteralPath $FilePath) {
+        if ($Line -match '^set "(?<name>[^=]+)=(?<value>.*)"$') {
+            $Values[$matches.name] = $matches.value
+        }
+    }
+    return $Values
+}
+
+function Resolve-ExistingPath {
+    param([string]$PathValue)
+    if ([string]::IsNullOrWhiteSpace($PathValue)) { return $null }
+    if (-not (Test-Path -LiteralPath $PathValue)) { return $null }
+    return [System.IO.Path]::GetFullPath($PathValue)
+}
+
+function Get-CommonAncestor {
+    param([string[]]$Paths)
+
+    $NormalizedPaths = @($Paths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object {
+        ([System.IO.Path]::GetFullPath($_).TrimEnd('\'))
+    })
+    if ($NormalizedPaths.Count -eq 0) { return $null }
+    if ($NormalizedPaths.Count -eq 1) { return $NormalizedPaths[0] }
+
+    $Common = $NormalizedPaths[0]
+    foreach ($PathValue in $NormalizedPaths[1..($NormalizedPaths.Count - 1)]) {
+        while ($Common -and -not $PathValue.StartsWith($Common, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $Common = Split-Path -Parent $Common
+        }
+    }
+    return $Common
+}
+
+function Get-RelativePath {
+    param([string]$BasePath, [string]$PathValue)
+
+    $BaseFull = [System.IO.Path]::GetFullPath($BasePath).TrimEnd('\', '/')
+    $PathFull = [System.IO.Path]::GetFullPath($PathValue).TrimEnd('\', '/')
+    if ($PathFull.Equals($BaseFull, [System.StringComparison]::OrdinalIgnoreCase)) { return "." }
+
+    $BasePrefix = $BaseFull + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $PathFull.StartsWith($BasePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Path '$PathFull' is not under base path '$BaseFull'"
+    }
+    return $PathFull.Substring($BasePrefix.Length)
+}
+
+function Get-BundleRuntimeRelativePath {
+    param([string]$PathValue, [string]$CommonRoot)
+
+    $PathFull = [System.IO.Path]::GetFullPath($PathValue).TrimEnd('\', '/')
+    $Parts = $PathFull -split '[\\/]'
+    for ($Index = 0; $Index -lt $Parts.Count; $Index++) {
+        if ($Parts[$Index].Equals("msys64", [System.StringComparison]::OrdinalIgnoreCase)) {
+            return ($Parts[$Index..($Parts.Count - 1)] -join [System.IO.Path]::DirectorySeparatorChar)
+        }
+    }
+
+    return Get-RelativePath -BasePath $CommonRoot -PathValue $PathValue
+}
+
+function New-ZipArchiveFromDirectory {
+    param([string]$SourceDirectory, [string]$DestinationArchive)
+
+    $TarCommand = Get-Command "tar.exe" -ErrorAction SilentlyContinue
+    if ($TarCommand) {
+        & $TarCommand.Source -a -cf $DestinationArchive -C $SourceDirectory .
+        if ($LASTEXITCODE -ne 0) {
+            throw "tar.exe failed with exit code $LASTEXITCODE while creating $DestinationArchive"
+        }
+        return
+    }
+
+    $SourceSize = (Get-ChildItem -LiteralPath $SourceDirectory -Recurse -File | Measure-Object -Property Length -Sum).Sum
+    if ($SourceSize -gt 2GB) {
+        throw "tar.exe was not found, and Compress-Archive is not safe here because Microsoft documents a 2GB ZipArchive limit."
+    }
+
+    Compress-Archive -Path (Join-Path $SourceDirectory "*") -DestinationPath $DestinationArchive -CompressionLevel Fastest -Force
+}
+
 function Get-ToolStatus {
     $Checks = [ordered]@{
         "yosys" = @(Find-CommandPath @("yosys.exe", "yosys"))
@@ -180,11 +385,27 @@ function Get-ToolStatus {
         }
     }
 
+    $ChipDb = Find-ChipDb $Device
+    if ($ChipDb) {
+        Write-Host ("[OK]   chipdb-{0}.bin: {1}" -f $Device, $ChipDb)
+    } else {
+        Write-Host ("[MISS] chipdb-{0}.bin" -f $Device)
+        $Missing += "chipdb-$Device.bin"
+    }
+
+    $PrjxrayDb = Find-PrjxrayDb
+    if ($PrjxrayDb) {
+        Write-Host ("[OK]   prjxray-db: {0}" -f $PrjxrayDb)
+    } else {
+        Write-Host "[MISS] prjxray-db"
+        $Missing += "prjxray-db"
+    }
+
     return @{
         Missing = $Missing
         HasYosys = $Missing -notcontains "yosys"
         HasOpenFpgaLoader = $Missing -notcontains "openFPGALoader"
-        HasFullBuildTools = ($Missing -notcontains "nextpnr-xilinx") -and ($Missing -notcontains "fasm2frames") -and ($Missing -notcontains "xc7frames2bit")
+        HasFullBuildTools = ($Missing -notcontains "nextpnr-xilinx") -and ($Missing -notcontains "fasm2frames") -and ($Missing -notcontains "xc7frames2bit") -and ($Missing -notcontains "chipdb-$Device.bin") -and ($Missing -notcontains "prjxray-db")
     }
 }
 
@@ -407,6 +628,42 @@ function Build-OneProject {
     Write-Host "[OK] Bitstream complete: $Bit"
 }
 
+function Ensure-FullBuildToolchain {
+    $MissingTools = @()
+    foreach ($ToolName in @("nextpnr-xilinx", "fasm2frames", "xc7frames2bit")) {
+        if (-not (Find-CommandPath @("$ToolName.exe", $ToolName))) {
+            $MissingTools += $ToolName
+        }
+    }
+
+    $MissingAssets = @()
+    if (-not (Find-ChipDb $Device)) { $MissingAssets += "chipdb-$Device.bin" }
+    if (-not (Find-PrjxrayDb)) { $MissingAssets += "prjxray-db" }
+
+    if ($MissingTools.Count -eq 0 -and $MissingAssets.Count -eq 0) { return }
+
+    Write-Host "Preparing full bitstream toolchain..."
+    try {
+        Install-OpenXc7Bundle -Force
+        Install-OpenXc7Shims
+    } catch {
+        throw "Unable to prepare full bitstream toolchain automatically: $($_.Exception.Message)`nRun .\fpga.bat setup -DownloadFullToolchain and retry."
+    }
+
+    $StillMissing = @()
+    foreach ($ToolName in @("nextpnr-xilinx", "fasm2frames", "xc7frames2bit")) {
+        if (-not (Find-CommandPath @("$ToolName.exe", $ToolName))) {
+            $StillMissing += $ToolName
+        }
+    }
+    if (-not (Find-ChipDb $Device)) { $StillMissing += "chipdb-$Device.bin" }
+    if (-not (Find-PrjxrayDb)) { $StillMissing += "prjxray-db" }
+
+    if ($StillMissing.Count -gt 0) {
+        throw "Bitstream generation requires the full toolchain, but these components are still missing: $($StillMissing -join ', ')`nRun .\fpga.bat setup -DownloadFullToolchain and retry."
+    }
+}
+
 function Invoke-Setup {
     New-Item -ItemType Directory -Force -Path $ToolBin, $BuildRoot | Out-Null
     Add-PathEntry $ToolBin
@@ -438,11 +695,14 @@ function Invoke-Setup {
             mingw-w64-x86_64-openFPGALoader
     }
 
+    $Config = Get-ToolchainConfig
+    $ExpectFullBuildSetup = ($null -ne $Config -and $Config.autoDownload) -or $DownloadFullToolchain -or $Ensure -or $RequireFullBuildTools
+
     try {
         Install-OpenXc7Bundle
         Install-OpenXc7Shims
     } catch {
-        if ($Ensure) { throw }
+        if ($ExpectFullBuildSetup) { throw }
         Write-Host "openXC7 auto-install skipped: $($_.Exception.Message)"
     }
 
@@ -458,6 +718,7 @@ function Invoke-Setup {
     }
 
     $Status = Get-ToolStatus
+    Write-ToolchainEnv
     $PrebuiltBitstreams = Get-PrebuiltBitstreams
     $LiteReady = $Status.HasOpenFpgaLoader -and $PrebuiltBitstreams.Count -gt 0
 
@@ -469,39 +730,24 @@ function Invoke-Setup {
 
     Write-Host "Missing tools: $($Status.Missing -join ', ')"
     Write-Host ""
-    if ($LiteReady) {
-        Write-Host "Lite mode is ready."
-        Write-Host "You can flash a prebuilt project without downloading the full build toolchain:"
-        Write-Host "  .\fpga.bat flash -Project $($PrebuiltBitstreams[0].Directory.Name)"
-        Write-Host ""
-    }
-
-    if ($Status.HasYosys -and -not $Status.HasFullBuildTools) {
-        Write-Host "Synthesis-only mode is ready."
-        Write-Host "You can still run: .\fpga.bat build -Project <name>"
-        Write-Host "That will generate .json output and skip .bit generation until the full toolchain is installed."
-        Write-Host ""
-    }
-
-    Write-Host "Windows-native target:"
-    Write-Host "  - Lightweight default: use prebuilt .bit files and .\fpga.bat flash -Project <name>"
-    Write-Host "  - Yosys can be installed from MSYS2 with: .\fpga.bat setup -InstallPackages"
-    Write-Host "  - Full openXC7/prjxray download is optional: .\fpga.bat setup -DownloadFullToolchain"
-    Write-Host "  - Native openXC7/MSYS2-built binaries can also be put on PATH or in .toolchain\tools\bin."
-    Write-Host "  - Vivado and WSL are not required by these scripts."
-
-    if ($RequireFullBuildTools -and -not $Status.HasFullBuildTools) {
+    if (-not $Status.HasYosys -or -not $Status.HasFullBuildTools) {
+        Write-Host "Setup did not finish with a complete bitstream build toolchain."
+        Write-Host "Expected build tools: yosys, nextpnr-xilinx, fasm2frames, xc7frames2bit, chipdb, prjxray-db."
         exit 1
     }
 
-    if ($LiteReady -or $Status.HasYosys) {
+    if ($LiteReady) {
+        Write-Host "Build toolchain is ready."
+        Write-Host "You can also flash a prebuilt project:"
+        Write-Host "  .\fpga.bat flash -Project $($PrebuiltBitstreams[0].Directory.Name)"
         return
     }
 
-    exit 1
+    Write-Host "Build toolchain is ready."
 }
 
 function Invoke-Build {
+    Ensure-FullBuildToolchain
     $Projects = @(Get-ProjectDirs)
 
     if ($All) {
@@ -560,24 +806,204 @@ function Show-Projects {
     }
 }
 
+function Invoke-Doctor {
+    New-Item -ItemType Directory -Force -Path $ToolBin, $BuildRoot | Out-Null
+    Add-PathEntry $ToolBin
+    Add-PathEntry $OpenXc7Root
+    Add-PathEntry (Join-Path $OpenXc7Root "oss-cad-suite\bin")
+    Add-PathEntry (Join-Path $OpenXc7Root "build\prjxray\tools")
+    Add-PathEntry $MingwBin
+    Add-PathEntry $UsrBin
+
+    Write-Host ""
+    Write-Host "====== FPGA Doctor ======"
+    Write-Host ""
+    Write-Host "Repository : $RepoRoot"
+    Write-Host "App Root   : $AppRoot"
+    Write-Host "Build Root : $BuildRoot"
+    Write-Host "Device     : $Device"
+    Write-Host "Part       : $Part"
+    Write-Host ""
+
+    $Status = Get-ToolStatus
+    Write-ToolchainEnv
+    Write-Host ""
+    if ($Status.Missing.Count -eq 0) {
+        Write-Host "Status     : ready"
+        Write-Host "Next step  : .\fpga.bat build -Project <name>"
+        return
+    }
+
+    Write-Host "Status     : incomplete"
+    Write-Host "Missing    : $($Status.Missing -join ', ')"
+    Write-Host ""
+    if (-not $Status.HasYosys) {
+        Write-Host "Fix        : install Yosys with .\fpga.bat setup -InstallPackages or add yosys.exe to PATH."
+    }
+    if (-not $Status.HasFullBuildTools) {
+        Write-Host "Fix        : publish or configure the Windows toolchain bundle, then rerun .\fpga.bat setup."
+    }
+    if (-not $Status.HasOpenFpgaLoader) {
+        Write-Host "Optional   : install openFPGALoader if you want to flash from this machine."
+    }
+}
+
+function Invoke-PackageToolchain {
+    $EnvFile = Join-Path $RepoRoot ".toolchain\env.bat"
+
+    if (-not $SkipSetup -and -not (Test-Path -LiteralPath $EnvFile)) {
+        & powershell -ExecutionPolicy Bypass -File $ScriptPath setup -Ensure -DownloadFullToolchain
+        if ($LASTEXITCODE -ne 0) {
+            throw "Toolchain setup failed with exit code $LASTEXITCODE"
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $EnvFile)) {
+        throw "Toolchain environment file not found: $EnvFile. Run .\fpga.bat setup on a machine with the full toolchain installed, or rerun .\fpga.bat package without -SkipSetup."
+    }
+
+    $EnvValues = Get-BatchEnvironmentValues -FilePath $EnvFile
+    $OssCadRoot = Resolve-ExistingPath $EnvValues.OSS_CAD
+    $NextpnrExe = Resolve-ExistingPath $EnvValues.NEXTPNR_EXE
+    $PrjxrayUtils = Resolve-ExistingPath $EnvValues.PRJXRAY_UTILS
+    $XrayDbRoot = Resolve-ExistingPath $EnvValues.XRAY_DB_ROOT
+    $Xc7frames2bitExe = Resolve-ExistingPath $EnvValues.XC7FRAMES2BIT_EXE
+    $ChipDbPath = if ($SkipChipDb) { $null } else { Resolve-ExistingPath $EnvValues.CHIPDB }
+
+    if (-not $OssCadRoot) { throw "OSS_CAD was not resolved from $EnvFile" }
+    if (-not $NextpnrExe) { throw "NEXTPNR_EXE was not resolved from $EnvFile" }
+    if (-not $PrjxrayUtils) { throw "PRJXRAY_UTILS was not resolved from $EnvFile" }
+    if (-not $XrayDbRoot) { throw "XRAY_DB_ROOT was not resolved from $EnvFile" }
+    if (-not $Xc7frames2bitExe) { throw "XC7FRAMES2BIT_EXE was not resolved from $EnvFile" }
+
+    $PrjxrayRoot = if ((Split-Path -Leaf $PrjxrayUtils).Equals("utils", [System.StringComparison]::OrdinalIgnoreCase)) {
+        Split-Path -Parent $PrjxrayUtils
+    } else {
+        $PrjxrayUtils
+    }
+    $PrjxrayRoot = Resolve-ExistingPath $PrjxrayRoot
+    if (-not $PrjxrayRoot) {
+        throw "Could not infer Project X-Ray root from PRJXRAY_UTILS=$PrjxrayUtils"
+    }
+
+    $ResolvedOutputPath = if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+        Join-Path $RepoRoot "dist\nexys-a7-100t-toolchain-windows.zip"
+    } elseif ([System.IO.Path]::IsPathRooted($OutputPath)) {
+        [System.IO.Path]::GetFullPath($OutputPath)
+    } else {
+        [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $OutputPath))
+    }
+    Ensure-Directory -PathValue (Split-Path -Parent $ResolvedOutputPath)
+
+    if ((Test-Path -LiteralPath $ResolvedOutputPath) -and -not $Force) {
+        throw "Output archive already exists: $ResolvedOutputPath. Re-run with -Force to overwrite it."
+    }
+
+    $StagingRoot = New-TemporaryDirectory
+    $BundleRoot = Join-Path $StagingRoot "toolchain"
+
+    try {
+        Ensure-Directory -PathValue $BundleRoot
+
+        Write-Host "Copying OSS CAD Suite from $OssCadRoot"
+        Copy-Item -LiteralPath $OssCadRoot -Destination (Join-Path $BundleRoot "oss-cad-suite") -Recurse -Force
+
+        Write-Host "Copying nextpnr-xilinx from $NextpnrExe"
+        Copy-Item -LiteralPath $NextpnrExe -Destination (Join-Path $BundleRoot "nextpnr-xilinx.exe") -Force
+
+        Write-Host "Copying Project X-Ray from $PrjxrayRoot"
+        Ensure-Directory -PathValue (Join-Path $BundleRoot "src")
+        Copy-Item -LiteralPath $PrjxrayRoot -Destination (Join-Path $BundleRoot "src\prjxray") -Recurse -Force
+
+        Write-Host "Copying Project X-Ray database from $XrayDbRoot"
+        Ensure-Directory -PathValue (Join-Path $BundleRoot "src\prjxray-db")
+        Copy-Item -LiteralPath $XrayDbRoot -Destination (Join-Path $BundleRoot "src\prjxray-db\artix7") -Recurse -Force
+
+        Write-Host "Copying xc7frames2bit from $Xc7frames2bitExe"
+        Ensure-Directory -PathValue (Join-Path $BundleRoot "build\prjxray\tools")
+        Copy-Item -LiteralPath $Xc7frames2bitExe -Destination (Join-Path $BundleRoot "build\prjxray\tools\xc7frames2bit.exe") -Force
+
+        if ($ChipDbPath) {
+            Write-Host "Copying chipdb from $ChipDbPath"
+            Ensure-Directory -PathValue (Join-Path $BundleRoot "tools")
+            Copy-Item -LiteralPath $ChipDbPath -Destination (Join-Path $BundleRoot "tools\xc7a100t.bin") -Force
+        }
+
+        $PathExtras = @()
+        if ($EnvValues.PATH) {
+            foreach ($PathEntry in ($EnvValues.PATH -split ';')) {
+                if ([string]::IsNullOrWhiteSpace($PathEntry) -or $PathEntry -eq "%PATH%") { continue }
+                $ResolvedEntry = Resolve-ExistingPath $PathEntry
+                if (-not $ResolvedEntry) { continue }
+                if ($ResolvedEntry.StartsWith($OssCadRoot, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+                if (-not $PathExtras.Contains($ResolvedEntry)) { $PathExtras += $ResolvedEntry }
+            }
+        }
+
+        if ($PathExtras.Count -gt 0) {
+            $CommonRoot = Get-CommonAncestor -Paths $PathExtras
+            if ($CommonRoot) {
+                foreach ($PathEntry in $PathExtras) {
+                    $RelativePath = Get-BundleRuntimeRelativePath -PathValue $PathEntry -CommonRoot $CommonRoot
+                    $DestinationPath = Join-Path $BundleRoot $RelativePath
+                    Write-Host "Copying runtime path $PathEntry"
+                    Copy-Item -LiteralPath $PathEntry -Destination $DestinationPath -Recurse -Force
+                }
+            }
+        }
+
+        $ManifestPath = Join-Path $BundleRoot "bundle-manifest.txt"
+        @(
+            "Created: $(Get-Date -Format s)"
+            "OSS CAD Suite: $OssCadRoot"
+            "nextpnr-xilinx: $NextpnrExe"
+            "Project X-Ray: $PrjxrayRoot"
+            "Project X-Ray DB: $XrayDbRoot"
+            "xc7frames2bit: $Xc7frames2bitExe"
+            "chipdb: $ChipDbPath"
+        ) | Set-Content -LiteralPath $ManifestPath -Encoding ASCII
+
+        if (Test-Path -LiteralPath $ResolvedOutputPath) {
+            Remove-Item -LiteralPath $ResolvedOutputPath -Force
+        }
+
+        Write-Host "Creating bundle archive $ResolvedOutputPath"
+        New-ZipArchiveFromDirectory -SourceDirectory $BundleRoot -DestinationArchive $ResolvedOutputPath
+        Write-Host "Bundle ready: $ResolvedOutputPath"
+    } finally {
+        Remove-DirectoryIfExists -PathValue $StagingRoot
+    }
+}
+
 function Show-Help {
-    Write-Host "FPGA Compiler for native Windows"
+    Write-Host "FPGA Compiler for Native Windows"
     Write-Host ""
     Write-Host "Usage:"
     Write-Host "  .\fpga.bat setup"
+    Write-Host "  .\fpga.bat install"
     Write-Host "  .\fpga.bat setup -InstallPackages"
     Write-Host "  .\fpga.bat setup -DownloadFullToolchain"
+    Write-Host "  .\fpga.bat doctor"
+    Write-Host "  .\fpga.bat package"
     Write-Host "  .\fpga.bat list"
     Write-Host "  .\fpga.bat build"
     Write-Host "  .\fpga.bat build -Project lab2"
     Write-Host "  .\fpga.bat flash"
     Write-Host "  .\fpga.bat flash -Project lab"
     Write-Host ""
+    Write-Host "Recommended first run:"
+    Write-Host "  .\fpga.bat setup"
+    Write-Host "  .\fpga.bat doctor"
+    Write-Host "  .\fpga.bat build -Project lab2"
+    Write-Host ""
 }
 
 try {
     switch ($Command.ToLowerInvariant()) {
         "setup" { Invoke-Setup }
+        "install" { Invoke-Setup }
+        "doctor" { Invoke-Doctor }
+        "package" { Invoke-PackageToolchain }
         "build" { Invoke-Build }
         "flash" { Invoke-Flash }
         "list" { Show-Projects }

@@ -1,5 +1,5 @@
 {
-  "autoDownload": false,
+  "autoDownload": true,
   "sharedToolchainRoot": "%LOCALAPPDATA%\\fpga-tools-cache",
   "toolchainBundle": {
     "root": "",
@@ -18,8 +18,9 @@
     ],
     "githubRelease": {
       "repo": "HaiPhan285/FPGA_Compiler_window",
-      "tag": "latest",
+      "tag": "toolchain-bundle",
       "assetPatterns": [
+        "nexys-a7-100t-toolchain-windows.zip",
         "*toolchain*windows*.zip",
         "*openxc7*windows*.zip",
         "*toolchain*.zip",
@@ -48,7 +49,7 @@
     "archiveSubPath": "tools\\xc7a100t.bin",
     "githubRelease": {
       "repo": "HaiPhan285/FPGA_Compiler_window",
-      "tag": "latest",
+      "tag": "toolchain-bundle",
       "assetPatterns": [
         "*xc7a100t*.bin",
         "*xc7a100t*.zip",
