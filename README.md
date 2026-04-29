@@ -9,36 +9,11 @@ For a fresh clone:
 ```powershell
 git clone https://github.com/HaiPhan285/FPGA_Compiler_window.git
 cd FPGA_Compiler_window
-```
-
-If you already have the repo, open PowerShell in the repository root and run:
-
-```powershell
 .\fpga.bat setup
 .\fpga.bat doctor
 ```
 
-`setup` prepares the native Windows toolchain used by build and flash commands. It will reuse the cached local bundle when available, and it can also install the common MSYS2 packages used by the flow.
-
-Optional setup modes:
-
-```powershell
-.\fpga.bat setup -InstallPackages
-.\fpga.bat setup -DownloadFullToolchain
-.\fpga.bat install
-```
-
-**MSYS2 is optional.** By default, `setup` downloads a pre-built Windows toolchain bundle. Only use `-InstallPackages` if you want MSYS2 to compile packages from source. Use `-DownloadFullToolchain` to force a fresh bundle download. `install` is an alias for `setup`.
-
-The scripts do not call Vivado, WSL, Ubuntu, or Bash. Tools are discovered from:
-
-- `.toolchain\tools\bin` (repo-local bundle)
-- `%LOCALAPPDATA%\fpga-tools-cache\openxc7-bundle` (shared cached bundle)
-- `C:\msys64\mingw64\bin` (optional MSYS2 installation)
-- `C:\msys64\usr\bin`
-- your normal `PATH`
-
-**For new users:** The toolchain bundle is configured in `toolchain.json` to download automatically from GitHub. No manual setup is required—just run `.\fpga.bat setup`.
+That's it. `setup` downloads a pre-built Windows toolchain bundle and prepares it for builds and flashing. No other dependencies required.
 
 After setup, run:
 
@@ -47,6 +22,29 @@ After setup, run:
 ```
 
 If everything is ready, `doctor` reports `Status : ready`.
+
+### Optional Setup Modes
+
+```powershell
+.\fpga.bat setup -InstallPackages
+.\fpga.bat setup -DownloadFullToolchain
+.\fpga.bat install
+```
+
+- **`-InstallPackages`**: Install MSYS2 packages (git, Python, build tools, Yosys, etc.). Only use this if you want to compile tools from source. Requires MSYS2 to be installed.
+- **`-DownloadFullToolchain`**: Force a fresh toolchain bundle download instead of using the local cache.
+- **`install`**: Alias for `setup`.
+
+### What's Included
+
+By default, the toolchain bundle provides:
+- **yosys** for synthesis
+- **nextpnr-xilinx** for place-and-route
+- **fasm2frames** and **xc7frames2bit** for bitstream generation
+- **prjxray-db** for Artix-7 chip database
+- **openFPGALoader** for flashing to hardware
+
+The bundle is stored in `%LOCALAPPDATA%\fpga-tools-cache` for reuse across projects.
 
 ## Publishing The Bundle
 
@@ -206,7 +204,9 @@ Then another user can clone the repo and flash a project without installing the 
 - Then run `.\fpga.bat setup` again.
 
 **"yosys: command not found"**
-- Run `.\fpga.bat setup -InstallPackages`, or add native `yosys.exe` to `PATH`.
+- The toolchain bundle should have included Yosys. Check that `setup` completed successfully.
+- If the bundle download failed, run `.\fpga.bat setup -DownloadFullToolchain` to retry.
+- Alternatively, if you installed MSYS2 with `-InstallPackages`, ensure `yosys.exe` is on PATH: `Get-Command yosys`.
 
 **"nextpnr-xilinx: command not found"**
 - For full Nexys A7 bitstreams, install native openXC7 tools or run `.\fpga.bat setup -DownloadFullToolchain`.
