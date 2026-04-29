@@ -59,6 +59,17 @@ function Get-ToolPathEntries {
         $OpenXc7Root,
         (Join-Path $OpenXc7Root "oss-cad-suite\bin"),
         (Join-Path $OpenXc7Root "build\prjxray\tools"),
+        (Join-Path $OpenXc7Root "src\prjxray\build\tools")
+    )
+    return @($Entries | Where-Object { $_ })
+}
+
+function Get-ToolPathEntriesWithMsys2 {
+    $Entries = @(
+        $ToolBin,
+        $OpenXc7Root,
+        (Join-Path $OpenXc7Root "oss-cad-suite\bin"),
+        (Join-Path $OpenXc7Root "build\prjxray\tools"),
         (Join-Path $OpenXc7Root "src\prjxray\build\tools"),
         $MingwBin,
         $UsrBin
@@ -744,8 +755,20 @@ function Ensure-FullBuildToolchain {
 
 function Invoke-Setup {
     New-Item -ItemType Directory -Force -Path $ToolBin, $BuildRoot | Out-Null
-    foreach ($PathEntry in Get-ToolPathEntries) {
-        Add-PathEntry $PathEntry
+    
+    if ($InstallPackages) {
+        $Pacman = Join-Path $UsrBin "pacman.exe"
+        if (-not (Test-Path $Pacman)) {
+            throw "MSYS2 was not found at $MsysRoot. Install MSYS2 from https://www.msys2.org, then rerun setup."
+        }
+        
+        foreach ($PathEntry in Get-ToolPathEntriesWithMsys2) {
+            Add-PathEntry $PathEntry
+        }
+    } else {
+        foreach ($PathEntry in Get-ToolPathEntries) {
+            Add-PathEntry $PathEntry
+        }
     }
 
     Write-Host ""
@@ -754,10 +777,6 @@ function Invoke-Setup {
 
     if ($InstallPackages) {
         $Pacman = Join-Path $UsrBin "pacman.exe"
-        if (-not (Test-Path $Pacman)) {
-            throw "MSYS2 was not found at $MsysRoot. Install MSYS2 from https://www.msys2.org, then rerun setup."
-        }
-
         Write-Host "Installing MSYS2 packages used by the open-source FPGA flow..."
         & $Pacman -S --noconfirm --needed `
             git base-devel make cmake python python-pip pkgconf `
@@ -783,7 +802,8 @@ function Invoke-Setup {
 
     if ($PersistPath) {
         $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-        foreach ($Entry in Get-ToolPathEntries) {
+        $PathEntries = if ($InstallPackages) { Get-ToolPathEntriesWithMsys2 } else { Get-ToolPathEntries }
+        foreach ($Entry in $PathEntries) {
             if ((Test-Path $Entry) -and (($UserPath -split ';') -notcontains $Entry)) {
                 $UserPath = "$Entry;$UserPath"
             }
