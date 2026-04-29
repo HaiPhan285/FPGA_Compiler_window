@@ -34,17 +34,40 @@ $MingwBin = Join-Path $MsysRoot "mingw64\bin"
 $UsrBin = Join-Path $MsysRoot "usr\bin"
 $AppRoot = Join-Path $RepoRoot "app"
 
-foreach ($PathEntry in @($ToolBin, $OpenXc7Root, (Join-Path $OpenXc7Root "oss-cad-suite\bin"), (Join-Path $OpenXc7Root "build\prjxray\tools"), $MingwBin, $UsrBin)) {
-    if ((Test-Path $PathEntry) -and (($env:Path -split ';') -notcontains $PathEntry)) {
-        $env:Path = "$PathEntry;$env:Path"
-    }
-}
-
 function Add-PathEntry {
     param([string]$PathEntry)
     if ((Test-Path $PathEntry) -and (($env:Path -split ';') -notcontains $PathEntry)) {
         $env:Path = "$PathEntry;$env:Path"
     }
+}
+
+function Get-Xc7Frames2BitExePath {
+    foreach ($Candidate in @(
+        (Join-Path $OpenXc7Root "build\prjxray\tools\xc7frames2bit.exe"),
+        (Join-Path $OpenXc7Root "src\prjxray\build\tools\xc7frames2bit.exe")
+    )) {
+        if (Test-Path -LiteralPath $Candidate) {
+            return (Resolve-Path -LiteralPath $Candidate).Path
+        }
+    }
+    return $null
+}
+
+function Get-ToolPathEntries {
+    $Entries = @(
+        $ToolBin,
+        $OpenXc7Root,
+        (Join-Path $OpenXc7Root "oss-cad-suite\bin"),
+        (Join-Path $OpenXc7Root "build\prjxray\tools"),
+        (Join-Path $OpenXc7Root "src\prjxray\build\tools"),
+        $MingwBin,
+        $UsrBin
+    )
+    return @($Entries | Where-Object { $_ })
+}
+
+foreach ($PathEntry in Get-ToolPathEntries) {
+    Add-PathEntry $PathEntry
 }
 
 function Find-CommandPath {
@@ -70,6 +93,21 @@ function Expand-ConfigPath {
 function Get-ToolchainConfig {
     if (-not (Test-Path -LiteralPath $ConfigPath)) { return $null }
     return Get-Content -Raw -LiteralPath $ConfigPath | ConvertFrom-Json
+}
+
+function Get-SharedToolchainBundleRoot {
+    $Config = Get-ToolchainConfig
+    if (-not $Config) { return $null }
+
+    $SharedRoot = Expand-ConfigPath $Config.sharedToolchainRoot
+    if (-not $SharedRoot) { return $null }
+
+    $BundleRoot = Join-Path $SharedRoot "openxc7-bundle"
+    if (Test-Path -LiteralPath $BundleRoot) {
+        return (Resolve-Path -LiteralPath $BundleRoot).Path
+    }
+
+    return $null
 }
 
 function Get-PrebuiltBitstreams {
@@ -120,7 +158,7 @@ function Expand-ArchiveToOpenXc7Root {
 
     if (Test-Path -LiteralPath $OpenXc7Root) { Remove-Item -LiteralPath $OpenXc7Root -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $OpenXc7Root | Out-Null
-    Copy-Item -LiteralPath (Join-Path $DetectedRoot "*") -Destination $OpenXc7Root -Recurse -Force
+    Copy-Item -Path (Join-Path $DetectedRoot "*") -Destination $OpenXc7Root -Recurse -Force
     Remove-Item -LiteralPath $ExtractRoot -Recurse -Force
 }
 
@@ -138,14 +176,21 @@ function Install-OpenXc7Bundle {
     }
 
     if ((Test-Path (Join-Path $OpenXc7Root "nextpnr-xilinx.exe")) -and
-        (Test-Path (Join-Path $OpenXc7Root "build\prjxray\tools\xc7frames2bit.exe"))) {
+        (Get-Xc7Frames2BitExePath)) {
         return
     }
 
     $BundleRoot = Expand-ConfigPath $Config.toolchainBundle.root
     if ($BundleRoot -and (Test-Path -LiteralPath $BundleRoot)) {
         New-Item -ItemType Directory -Force -Path $OpenXc7Root | Out-Null
-        Copy-Item -LiteralPath (Join-Path $BundleRoot "*") -Destination $OpenXc7Root -Recurse -Force
+        Copy-Item -Path (Join-Path $BundleRoot "*") -Destination $OpenXc7Root -Recurse -Force
+        return
+    }
+
+    $SharedBundleRoot = Get-SharedToolchainBundleRoot
+    if ($SharedBundleRoot) {
+        New-Item -ItemType Directory -Force -Path $OpenXc7Root | Out-Null
+        Copy-Item -Path (Join-Path $SharedBundleRoot "*") -Destination $OpenXc7Root -Recurse -Force
         return
     }
 
@@ -187,16 +232,44 @@ function Write-CommandShim {
 }
 
 function Install-OpenXc7Shims {
-    $Python = Find-CommandPath @("python.exe", "python", "python3.exe", "python3")
+    $Python = $null
+    $PythonCandidates = @(
+        (Join-Path $RepoRoot ".toolchain\prjxray-venv\bin\python.exe"),
+        (Join-Path $MingwBin "python.exe"),
+        (Join-Path $MingwBin "python3.exe"),
+        (Join-Path $OpenXc7Root "oss-cad-suite\bin\python.exe"),
+        (Join-Path $OpenXc7Root "oss-cad-suite\bin\python3.exe"),
+        (Find-CommandPath @("python.exe", "python", "python3.exe", "python3"))
+    ) | Where-Object { $_ }
+
+    foreach ($Candidate in $PythonCandidates) {
+        if (Test-Path -LiteralPath $Candidate) {
+            $Python = (Resolve-Path -LiteralPath $Candidate).Path
+            break
+        }
+    }
+
     Write-CommandShim -Name "nextpnr-xilinx" -Target (Join-Path $OpenXc7Root "nextpnr-xilinx.exe")
-    Write-CommandShim -Name "xc7frames2bit" -Target (Join-Path $OpenXc7Root "build\prjxray\tools\xc7frames2bit.exe")
+    Write-CommandShim -Name "xc7frames2bit" -Target (Get-Xc7Frames2BitExePath)
 
     $Fasm2FramesExe = Join-Path $OpenXc7Root "fasm2frames.exe"
     $Fasm2FramesPy = Join-Path $OpenXc7Root "src\prjxray\utils\fasm2frames.py"
     if (Test-Path -LiteralPath $Fasm2FramesExe) {
         Write-CommandShim -Name "fasm2frames" -Target $Fasm2FramesExe
     } elseif ($Python -and (Test-Path -LiteralPath $Fasm2FramesPy)) {
-        Write-CommandShim -Name "fasm2frames" -Target $Fasm2FramesPy -Prefix "`"$Python`""
+        $PrjxrayRoot = Get-PrjxrayRootPath
+        $PythonPaths = @(
+            $PrjxrayRoot,
+            (Join-Path $PrjxrayRoot "utils"),
+            (Join-Path $PrjxrayRoot "third_party\fasm")
+        ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+        $Shim = Join-Path $ToolBin "fasm2frames.bat"
+        $Lines = @(
+            "@echo off",
+            "set `"PYTHONPATH=$(($PythonPaths -join ';'));%PYTHONPATH%`"",
+            "`"$Python`" `"$Fasm2FramesPy`" %*"
+        )
+        Set-Content -LiteralPath $Shim -Value $Lines -Encoding ASCII
     }
 }
 
@@ -220,6 +293,19 @@ function Get-OssCadRoot {
     return $null
 }
 
+function Get-PrjxrayRootPath {
+    foreach ($Candidate in @(
+        (Join-Path $OpenXc7Root "src\prjxray"),
+        (Join-Path $RepoRoot "_openxc7_src\prjxray")
+    )) {
+        if (Test-Path -LiteralPath $Candidate) {
+            return (Resolve-Path -LiteralPath $Candidate).Path
+        }
+    }
+
+    return $null
+}
+
 function Write-ToolchainEnv {
     $EnvFile = Join-Path $RepoRoot ".toolchain\env.bat"
     $NextpnrExe = Find-CommandPath @("nextpnr-xilinx.exe", "nextpnr-xilinx")
@@ -227,16 +313,8 @@ function Write-ToolchainEnv {
     $Frames2Bit = Find-CommandPath @("xc7frames2bit.exe", "xc7frames2bit")
     $ChipDbPath = Find-ChipDb $Device
     $PrjxrayDbRoot = Find-PrjxrayDb
-    $PrjxrayUtils = $null
-    foreach ($Candidate in @(
-        (Join-Path $OpenXc7Root "src\prjxray\utils"),
-        (Join-Path $RepoRoot "_openxc7_src\prjxray\utils")
-    )) {
-        if (Test-Path -LiteralPath $Candidate) {
-            $PrjxrayUtils = (Resolve-Path -LiteralPath $Candidate).Path
-            break
-        }
-    }
+    $PrjxrayRoot = Get-PrjxrayRootPath
+    $PrjxrayUtils = if ($PrjxrayRoot) { Join-Path $PrjxrayRoot "utils" } else { $null }
 
     $Values = [ordered]@{
         "OSS_CAD" = Get-OssCadRoot
@@ -246,7 +324,7 @@ function Write-ToolchainEnv {
         "XC7FRAMES2BIT_EXE" = $Frames2Bit
         "FASM2FRAMES_EXE" = $Fasm2Frames
         "CHIPDB" = $ChipDbPath
-        "PATH" = (@($ToolBin, $OpenXc7Root, (Join-Path $OpenXc7Root "oss-cad-suite\bin"), (Join-Path $OpenXc7Root "build\prjxray\tools"), $MingwBin, $UsrBin) | Where-Object { Test-Path $_ }) -join ';'
+        "PATH" = (@(Get-ToolPathEntries | Where-Object { Test-Path $_ }) -join ';')
     }
 
     $Lines = @("@echo off")
@@ -666,12 +744,9 @@ function Ensure-FullBuildToolchain {
 
 function Invoke-Setup {
     New-Item -ItemType Directory -Force -Path $ToolBin, $BuildRoot | Out-Null
-    Add-PathEntry $ToolBin
-    Add-PathEntry $OpenXc7Root
-    Add-PathEntry (Join-Path $OpenXc7Root "oss-cad-suite\bin")
-    Add-PathEntry (Join-Path $OpenXc7Root "build\prjxray\tools")
-    Add-PathEntry $MingwBin
-    Add-PathEntry $UsrBin
+    foreach ($PathEntry in Get-ToolPathEntries) {
+        Add-PathEntry $PathEntry
+    }
 
     Write-Host ""
     Write-Host "====== FPGA Setup ======"
@@ -708,7 +783,7 @@ function Invoke-Setup {
 
     if ($PersistPath) {
         $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-        foreach ($Entry in @($ToolBin, $OpenXc7Root, (Join-Path $OpenXc7Root "oss-cad-suite\bin"), (Join-Path $OpenXc7Root "build\prjxray\tools"), $MingwBin, $UsrBin)) {
+        foreach ($Entry in Get-ToolPathEntries) {
             if ((Test-Path $Entry) -and (($UserPath -split ';') -notcontains $Entry)) {
                 $UserPath = "$Entry;$UserPath"
             }
@@ -808,12 +883,9 @@ function Show-Projects {
 
 function Invoke-Doctor {
     New-Item -ItemType Directory -Force -Path $ToolBin, $BuildRoot | Out-Null
-    Add-PathEntry $ToolBin
-    Add-PathEntry $OpenXc7Root
-    Add-PathEntry (Join-Path $OpenXc7Root "oss-cad-suite\bin")
-    Add-PathEntry (Join-Path $OpenXc7Root "build\prjxray\tools")
-    Add-PathEntry $MingwBin
-    Add-PathEntry $UsrBin
+    foreach ($PathEntry in Get-ToolPathEntries) {
+        Add-PathEntry $PathEntry
+    }
 
     Write-Host ""
     Write-Host "====== FPGA Doctor ======"

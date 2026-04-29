@@ -2,30 +2,33 @@
 
 Open-source build flow for **Digilent Nexys A7-100T** on Windows without Vivado and without WSL.
 
-## Quick Start
+## Setup
+
+For a fresh clone:
 
 ```powershell
 git clone https://github.com/HaiPhan285/FPGA_Compiler_window.git
 cd FPGA_Compiler_window
-
-.\fpga.bat install
-.\fpga.bat doctor
-.\fpga.bat build -Project lab2
 ```
 
-Build one project directly:
+If you already have the repo, open PowerShell in the repository root and run:
 
 ```powershell
-.\fpga.bat build -Project lab2
+.\fpga.bat setup
+.\fpga.bat doctor
 ```
 
-## Requirements
+`setup` prepares the native Windows toolchain used by build and flash commands. It will reuse the cached local bundle when available, and it can also install the common MSYS2 packages used by the flow.
 
-- **Yosys** for synthesis.
-- **nextpnr-xilinx** plus a matching `chipdb-xc7a100t.bin` for place-and-route.
-- **prjxray** tools (`fasm2frames`, `xc7frames2bit`) plus `prjxray-db` for `.bit` generation.
-- **openFPGALoader** for flashing.
-- **MSYS2** is the recommended native Windows package/build environment.
+Optional setup modes:
+
+```powershell
+.\fpga.bat setup -InstallPackages
+.\fpga.bat setup -DownloadFullToolchain
+.\fpga.bat install
+```
+
+Use `-InstallPackages` when you want MSYS2 to install Yosys and the other standard packages used by this repo. Use `-DownloadFullToolchain` when you want to force the full toolchain bundle setup. `install` is an alias for `setup`.
 
 The scripts do not call Vivado, WSL, Ubuntu, or Bash. They discover native `.exe` tools from:
 
@@ -34,30 +37,15 @@ The scripts do not call Vivado, WSL, Ubuntu, or Bash. They discover native `.exe
 - `C:\msys64\usr\bin`
 - your normal `PATH`
 
-Install common MSYS2 packages:
+The repo expects the Windows toolchain bundle at `toolchain.json` -> `toolchainBundle.githubRelease` tag `toolchain-bundle` with asset `nexys-a7-100t-toolchain-windows.zip`, or from the configured local/download source in `toolchain.json`.
+
+After setup, run:
 
 ```powershell
-.\fpga.bat setup -InstallPackages
+.\fpga.bat doctor
 ```
 
-`nextpnr-xilinx` and `prjxray` are not part of the normal OSS CAD Suite Windows package. Put native openXC7/MSYS2-built binaries in `.toolchain\tools\bin` or on `PATH`.
-
-By default, `.\fpga.bat setup` now prepares the full place-and-route / bitstream toolchain for new users.
-
-If you want to force the bundle download explicitly, you can still run:
-
-```powershell
-.\fpga.bat setup -DownloadFullToolchain
-```
-
-The full toolchain bundle can come from any of these sources, in this order:
-- `toolchain.json` -> `toolchainBundle.root` for a local unpacked bundle folder
-- `toolchain.json` -> `toolchainBundle.downloadUrl` plus optional `archiveName` for a direct zip download
-- `toolchain.json` -> `toolchainBundle.githubRelease` for a GitHub release asset
-
-If the configured GitHub repo has no releases, setup now reports that directly instead of failing with a raw `404`.
-
-This repo is configured to look for the bundle release tag `toolchain-bundle` and the asset `nexys-a7-100t-toolchain-windows.zip`.
+If everything is ready, `doctor` reports `Status : ready`.
 
 ## Publishing The Bundle
 
@@ -72,6 +60,8 @@ Options:
 ```powershell
 .\fpga.bat setup
 .\fpga.bat install
+.\fpga.bat setup -InstallPackages
+.\fpga.bat setup -DownloadFullToolchain
 .\fpga.bat doctor
 .\fpga.bat package
 .\fpga.bat list
@@ -82,6 +72,28 @@ Options:
 .\fpga.bat flash -Project lab
 .\fpga.bat flash -Bitstream build\lab\lab.bit
 ```
+
+## Build Your First Project
+
+If setup is complete and `doctor` shows `Status : ready`, build a project with:
+
+```powershell
+.\fpga.bat build -Project lab2
+```
+
+That command runs synthesis, place-and-route, and bitstream generation. When it finishes successfully, you should see:
+
+```text
+[OK] Bitstream complete: ...
+```
+
+If you want to build without typing a project name:
+
+```powershell
+.\fpga.bat build
+```
+
+That works when the repo has only one buildable project. If there are multiple projects, the script shows a numbered list and asks you to choose one.
 
 ## Project Structure
 
