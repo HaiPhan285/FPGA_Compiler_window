@@ -1,10 +1,10 @@
 {
-  "autoDownload": true,
+  "autoDownload": false,
   "sharedToolchainRoot": "%LOCALAPPDATA%\\fpga-tools-cache",
   "toolchainBundle": {
-    "root": "",
-    "downloadUrl": "https://github.com/HaiPhan285/FPGA_Compiler_window/releases/download/toolchain-bundle/nexys-a7-100t-toolchain-windows.zip",
-    "archiveName": "nexys-a7-100t-toolchain-windows.zip",
+    "root": ".toolchain\\openxc7-bundle",
+    "downloadUrl": "",
+    "archiveName": "",
     "ossCadSuiteRoot": "oss-cad-suite",
     "nextpnrExe": "nextpnr-xilinx.exe",
     "prjxrayRoot": "src\\prjxray",
