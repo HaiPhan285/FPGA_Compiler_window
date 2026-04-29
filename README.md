@@ -28,16 +28,17 @@ Optional setup modes:
 .\fpga.bat install
 ```
 
-Use `-InstallPackages` when you want MSYS2 to install Yosys and the other standard packages used by this repo. Use `-DownloadFullToolchain` when you want to force the full toolchain bundle setup. `install` is an alias for `setup`.
+**MSYS2 is optional.** By default, `setup` downloads a pre-built Windows toolchain bundle. Only use `-InstallPackages` if you want MSYS2 to compile packages from source. Use `-DownloadFullToolchain` to force a fresh bundle download. `install` is an alias for `setup`.
 
-The scripts do not call Vivado, WSL, Ubuntu, or Bash. They discover native `.exe` tools from:
+The scripts do not call Vivado, WSL, Ubuntu, or Bash. Tools are discovered from:
 
-- `.toolchain\tools\bin`
-- `C:\msys64\mingw64\bin`
+- `.toolchain\tools\bin` (repo-local bundle)
+- `%LOCALAPPDATA%\fpga-tools-cache\openxc7-bundle` (shared cached bundle)
+- `C:\msys64\mingw64\bin` (optional MSYS2 installation)
 - `C:\msys64\usr\bin`
 - your normal `PATH`
 
-The repo expects the Windows toolchain bundle at `toolchain.json` -> `toolchainBundle.githubRelease` tag `toolchain-bundle` with asset `nexys-a7-100t-toolchain-windows.zip`, or from the configured local/download source in `toolchain.json`.
+**For new users:** The toolchain bundle is configured in `toolchain.json` to download automatically from GitHub. No manual setup is required—just run `.\fpga.bat setup`.
 
 After setup, run:
 
@@ -150,12 +151,21 @@ set_property -dict {PACKAGE_PIN H17 IOSTANDARD LVCMOS33} [get_ports {led}]
 ## Build Outputs
 
 After building, outputs are in `build/` folder:
-- `project_name.json` - Synthesis output
-- `project_name.fasm` - Place & Route output (requires nextpnr-xilinx)
-- `project_name.frames` - Frame data (requires prjxray)
-- `project_name.bit` - Bitstream (requires prjxray)
+- `project_name.json` - Synthesis output (requires **yosys**)
+- `project_name.fasm` - Place & Route output (requires **nextpnr-xilinx** + chipdb)
+- `project_name.frames` - Frame data (requires **fasm2frames**)
+- `project_name.bit` - Bitstream (requires **xc7frames2bit** + prjxray-db)
 
 When `.bit` generation succeeds, the bitstream is also copied into the project folder under `app/`.
+
+### Tool Requirements
+
+- **Synthesis only** (`yosys`): Generates `.json` file
+- **Place-and-route** (`nextpnr-xilinx`, chipdb): Generates `.fasm` file  
+- **Bitstream generation** (`fasm2frames`, `xc7frames2bit`, prjxray-db): Generates `.bit` file
+- **Flashing** (`openFPGALoader`): Programs the board
+
+The default bundle includes all of these. MSYS2 is not required for builds—it is only used if you run `setup -InstallPackages` to compile packages from source.
 
 ## Flashing to Hardware
 
@@ -186,6 +196,14 @@ Then another user can clone the repo and flash a project without installing the 
 ```
 
 ## Troubleshooting
+
+**"GitHub release not found for HaiPhan285/FPGA_Compiler_window"**
+- The toolchain bundle has not been published as a GitHub release asset yet.
+- **Option 1:** Wait for the maintainer to publish the `toolchain-bundle` release.
+- **Option 2:** Configure a local or direct download bundle in `toolchain.json`:
+  - Set `toolchainBundle.root` to a local unpacked openXC7 bundle folder, or
+  - Set `toolchainBundle.downloadUrl` to a direct `.zip` download URL (if available)
+- Then run `.\fpga.bat setup` again.
 
 **"yosys: command not found"**
 - Run `.\fpga.bat setup -InstallPackages`, or add native `yosys.exe` to `PATH`.
