@@ -490,8 +490,13 @@ function Get-ToolStatus {
         $Missing += "prjxray-db"
     }
 
+    $RequiredTools = @($Missing | Where-Object { $_ -ne "yosys" })
+    $OptionalTools = @($Missing | Where-Object { $_ -eq "yosys" -or $_ -eq "openFPGALoader" })
+    
     return @{
         Missing = $Missing
+        MissingRequired = $RequiredTools
+        MissingOptional = $OptionalTools
         HasYosys = $Missing -notcontains "yosys"
         HasOpenFpgaLoader = $Missing -notcontains "openFPGALoader"
         HasFullBuildTools = ($Missing -notcontains "nextpnr-xilinx") -and ($Missing -notcontains "fasm2frames") -and ($Missing -notcontains "xc7frames2bit") -and ($Missing -notcontains "chipdb-$Device.bin") -and ($Missing -notcontains "prjxray-db")
@@ -920,20 +925,25 @@ function Invoke-Doctor {
     $Status = Get-ToolStatus
     Write-ToolchainEnv
     Write-Host ""
-    if ($Status.Missing.Count -eq 0) {
+    if ($Status.MissingRequired.Count -eq 0) {
         Write-Host "Status     : ready"
-        Write-Host "Next step  : .\fpga.bat build -Project <name>"
+        if ($Status.MissingOptional.Count -eq 0) {
+            Write-Host "Next step  : .\fpga.bat build -Project <name>"
+        } else {
+            Write-Host "Note       : Some optional tools are missing: $($Status.MissingOptional -join ', ')"
+            Write-Host "Next step  : .\fpga.bat build -Project <name> or install missing optional tools"
+        }
         return
     }
 
     Write-Host "Status     : incomplete"
     Write-Host "Missing    : $($Status.Missing -join ', ')"
     Write-Host ""
-    if (-not $Status.HasYosys) {
-        Write-Host "Fix        : install Yosys with .\fpga.bat setup -InstallPackages or add yosys.exe to PATH."
-    }
-    if (-not $Status.HasFullBuildTools) {
+    if ($Status.MissingRequired) {
         Write-Host "Fix        : publish or configure the Windows toolchain bundle, then rerun .\fpga.bat setup."
+    }
+    if (-not $Status.HasYosys) {
+        Write-Host "Note       : Yosys is needed only if building from Verilog source. For pre-built projects, install with: .\fpga.bat setup -InstallPackages"
     }
     if (-not $Status.HasOpenFpgaLoader) {
         Write-Host "Optional   : install openFPGALoader if you want to flash from this machine."

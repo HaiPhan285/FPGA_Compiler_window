@@ -33,6 +33,18 @@ That's it. `setup` will:
 
 No manual extraction needed. It's all automatic.
 
+### Optional: Yosys for Synthesis
+
+If you want to **synthesize your own Verilog designs**, install Yosys:
+
+```powershell
+.\fpga.bat setup -InstallPackages
+```
+
+This adds Yosys and other synthesis tools via pacman. Without it, you can only build from pre-built `.json` files or pre-built projects.
+
+**Note:** This step requires ~1GB additional disk space for the MSYS2 environment.
+
 ## Build a Project
 
 ```powershell
@@ -40,11 +52,13 @@ No manual extraction needed. It's all automatic.
 ```
 
 This runs:
-1. **Synthesis** (yosys) → `.json`
+1. **Synthesis** (yosys) → `.json` *(requires Yosys; skipped if `.json` already exists)*
 2. **Place-and-route** (nextpnr-xilinx) → `.fasm`
 3. **Bitstream generation** (fasm2frames, xc7frames2bit) → `.bit`
 
-Outputs go to `build\lab2\` and `app\lab2\`.
+**Note:** If you don't have Yosys installed and the project has Verilog source files, the build will fail. Either:
+- Install Yosys with `.\fpga.bat setup -InstallPackages`, or
+- Use a project that already has a `.json` file
 
 ## Flash to Hardware
 
