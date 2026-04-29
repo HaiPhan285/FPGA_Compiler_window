@@ -2,20 +2,51 @@
 
 Open-source build flow for **Digilent Nexys A7-100T** on Windows without Vivado and without WSL.
 
-## Setup
-
-For a fresh clone:
+## Quick Start
 
 ```powershell
 git clone https://github.com/HaiPhan285/FPGA_Compiler_window.git
 cd FPGA_Compiler_window
 .\fpga.bat setup
 .\fpga.bat doctor
+.\fpga.bat build -Project lab2
+.\fpga.bat flash -Project lab2
 ```
 
-**That's it.** No flags, no MSYS2 required.
+That's it. One command to setup, one to build, one to flash.
 
-`setup` prepares the toolchain from the repo-local bundle (`.toolchain\openxc7-bundle`). After setup completes, run `doctor` to verify everything is ready.
+## Setup
+
+Before building, prepare the toolchain:
+
+```powershell
+.\fpga.bat setup
+.\fpga.bat doctor
+```
+
+`setup` configures the toolchain from the repo-local bundle (`.toolchain\openxc7-bundle`).  
+`doctor` verifies everything is ready. Look for `Status : ready`.
+
+## Build a Project
+
+```powershell
+.\fpga.bat build -Project lab2
+```
+
+This runs:
+1. **Synthesis** (yosys) → `.json`
+2. **Place-and-route** (nextpnr-xilinx) → `.fasm`
+3. **Bitstream generation** (fasm2frames, xc7frames2bit) → `.bit`
+
+Outputs go to `build\lab2\` and `app\lab2\`.
+
+## Flash to Hardware
+
+```powershell
+.\fpga.bat flash -Project lab2
+```
+
+Programs the Nexys A7-100T with the built bitstream.
 
 ## Publishing The Bundle
 
@@ -27,40 +58,17 @@ Options:
 
 ## Commands
 
-```powershell
-.\fpga.bat setup
-.\fpga.bat doctor
-.\fpga.bat build
-.\fpga.bat build -Project lab2
-.\fpga.bat build -All
-.\fpga.bat flash
-.\fpga.bat flash -Project lab
-.\fpga.bat flash -Bitstream build\lab\lab.bit
-.\fpga.bat list
-.\fpga.bat package
-```
-
-## Build Your First Project
-
-If setup is complete and `doctor` shows `Status : ready`, build a project with:
-
-```powershell
-.\fpga.bat build -Project lab2
-```
-
-That command runs synthesis, place-and-route, and bitstream generation. When it finishes successfully, you should see:
-
-```text
-[OK] Bitstream complete: ...
-```
-
-If you want to build without typing a project name:
-
-```powershell
-.\fpga.bat build
-```
-
-That works when the repo has only one buildable project. If there are multiple projects, the script shows a numbered list and asks you to choose one.
+| Command | Description |
+|---------|-------------|
+| `.\fpga.bat setup` | Initialize toolchain |
+| `.\fpga.bat doctor` | Check if everything is ready |
+| `.\fpga.bat build` | Build default/selected project |
+| `.\fpga.bat build -Project <name>` | Build specific project |
+| `.\fpga.bat build -All` | Build all projects |
+| `.\fpga.bat flash` | Flash newest bitstream |
+| `.\fpga.bat flash -Project <name>` | Flash project bitstream |
+| `.\fpga.bat flash -Bitstream <path>` | Flash specific bitstream file |
+| `.\fpga.bat list` | List available projects |
 
 ## Project Structure
 
