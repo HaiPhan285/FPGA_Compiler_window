@@ -17,34 +17,21 @@ That's it. One command to setup, one to build, one to flash.
 
 ## Setup
 
-Before building, you need the toolchain bundle. Extract it to the repo:
+Just run:
 
 ```powershell
-# 1. Extract the openXC7 bundle to .toolchain\openxc7-bundle
-#    (unzip or copy the bundle folder here)
-
-# 2. Then configure the toolchain:
 .\fpga.bat setup
 .\fpga.bat doctor
 ```
 
-`setup` configures the toolchain from the repo-local bundle (`.toolchain\openxc7-bundle`).  
+That's it. `setup` will:
+1. **Download** the toolchain bundle (if not already present)
+2. **Extract** it to `.toolchain\openxc7-bundle\`
+3. **Configure** the toolchain
+
 `doctor` verifies everything is ready. Look for `Status : ready`.
 
-**Folder structure should be:**
-```
-FPGA_Compiler_window/
-├── .toolchain/
-│   └── openxc7-bundle/
-│       ├── nextpnr-xilinx.exe
-│       ├── fasm2frames.exe
-│       ├── build/prjxray/tools/xc7frames2bit.exe
-│       ├── src/prjxray-db/
-│       └── oss-cad-suite/bin/
-└── (other repo files)
-```
-
-If `doctor` shows `Status : ready`, you're good to build and flash.
+No manual extraction needed. It's all automatic.
 
 ## Build a Project
 
