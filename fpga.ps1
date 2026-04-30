@@ -100,16 +100,17 @@ function Get-ToolPathEntries {
 }
 
 function Get-ToolPathEntriesWithMsys2 {
-    $Entries = @(
-        $ToolBin,
-        $OpenXc7Root,
-        (Join-Path $OpenXc7Root "oss-cad-suite\bin"),
-        (Join-Path $OpenXc7Root "build\prjxray\tools"),
-        (Join-Path $OpenXc7Root "src\prjxray\build\tools"),
-        $MingwBin,
-        $UsrBin
-    )
-    return @($Entries | Where-Object { $_ })
+    $Entries = @()
+    if ($ToolBin) { $Entries += $ToolBin }
+    if ($OpenXc7Root) { 
+        $Entries += $OpenXc7Root
+        $Entries += (Join-PathCrossPlatform $OpenXc7Root "oss-cad-suite\bin")
+        $Entries += (Join-PathCrossPlatform $OpenXc7Root "build\prjxray\tools")
+        $Entries += (Join-PathCrossPlatform $OpenXc7Root "src\prjxray\build\tools")
+    }
+    if ($MingwBin) { $Entries += $MingwBin }
+    if ($UsrBin) { $Entries += $UsrBin }
+    return $Entries
 }
 
 foreach ($PathEntry in Get-ToolPathEntries) {
