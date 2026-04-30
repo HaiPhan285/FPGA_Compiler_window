@@ -27,27 +27,59 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptPath = $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ToolRoot = Join-Path $RepoRoot ".toolchain\tools"
-$ToolBin = Join-Path $ToolRoot "bin"
-$BuildRoot = Join-Path $RepoRoot "build"
-$ConfigPath = Join-Path $RepoRoot "toolchain.json"
-$OpenXc7Root = Join-Path $ToolRoot "openxc7"
-$MsysRoot = "C:\msys64"
-$MingwBin = Join-Path $MsysRoot "mingw64\bin"
-$UsrBin = Join-Path $MsysRoot "usr\bin"
+
+# Cross-platform path handling
+$RunningOnWindows = $PSVersionTable.Platform -eq "Win32NT" -or $PSVersionTable.PSVersion.Major -lt 6
+$RunningOnLinux = $PSVersionTable.OS -match "Linux"
+
+if ($RunningOnWindows) {
+    $PathSeparator = "\"
+    $ToolRoot = Join-Path $RepoRoot ".toolchain\tools"
+    $ToolBin = Join-Path $ToolRoot "bin"
+    $BuildRoot = Join-Path $RepoRoot "build"
+    $ConfigPath = Join-Path $RepoRoot "toolchain.json"
+    $OpenXc7Root = Join-Path $ToolRoot "openxc7"
+    $MsysRoot = "C:\msys64"
+    $MingwBin = Join-Path $MsysRoot "mingw64\bin"
+    $UsrBin = Join-Path $MsysRoot "usr\bin"
+} else {
+    $PathSeparator = "/"
+    $ToolRoot = Join-Path $RepoRoot ".toolchain/tools"
+    $ToolBin = Join-Path $ToolRoot "bin"
+    $BuildRoot = Join-Path $RepoRoot "build"
+    $ConfigPath = Join-Path $RepoRoot "toolchain.json"
+    $OpenXc7Root = Join-Path $ToolRoot "openxc7"
+    $MsysRoot = ""
+    $MingwBin = ""
+    $UsrBin = "/usr/bin"
+}
 $AppRoot = Join-Path $RepoRoot "app"
 
 function Add-PathEntry {
     param([string]$PathEntry)
-    if ((Test-Path $PathEntry) -and (($env:Path -split ';') -notcontains $PathEntry)) {
-        $env:Path = "$PathEntry;$env:Path"
+    $PathSep = if ($RunningOnLinux) { ":" } else { ";" }
+    $Paths = if ($RunningOnLinux) { $env:PATH } else { $env:Path }
+    if ((Test-Path $PathEntry) -and (($Paths -split $PathSep) -notcontains $PathEntry)) {
+        if ($RunningOnLinux) {
+            $env:PATH = "$PathEntry" + ":" + $env:PATH
+        } else {
+            $env:Path = "$PathEntry;$env:Path"
+        }
     }
+}
+
+function Join-PathCrossPlatform {
+    param([string]$BasePath, [string]$RelativePath)
+    if ($RunningOnLinux) {
+        $RelativePath = $RelativePath -replace "\\", "/"
+    }
+    return Join-Path $BasePath $RelativePath
 }
 
 function Get-Xc7Frames2BitExePath {
     foreach ($Candidate in @(
-        (Join-Path $OpenXc7Root "build\prjxray\tools\xc7frames2bit.exe"),
-        (Join-Path $OpenXc7Root "src\prjxray\build\tools\xc7frames2bit.exe")
+        (Join-PathCrossPlatform $OpenXc7Root "build\prjxray\tools\xc7frames2bit.exe"),
+        (Join-PathCrossPlatform $OpenXc7Root "src\prjxray\build\tools\xc7frames2bit.exe")
     )) {
         if (Test-Path -LiteralPath $Candidate) {
             return (Resolve-Path -LiteralPath $Candidate).Path
@@ -60,9 +92,9 @@ function Get-ToolPathEntries {
     $Entries = @(
         $ToolBin,
         $OpenXc7Root,
-        (Join-Path $OpenXc7Root "oss-cad-suite\bin"),
-        (Join-Path $OpenXc7Root "build\prjxray\tools"),
-        (Join-Path $OpenXc7Root "src\prjxray\build\tools")
+        (Join-PathCrossPlatform $OpenXc7Root "oss-cad-suite\bin"),
+        (Join-PathCrossPlatform $OpenXc7Root "build\prjxray\tools"),
+        (Join-PathCrossPlatform $OpenXc7Root "src\prjxray\build\tools")
     )
     return @($Entries | Where-Object { $_ })
 }
