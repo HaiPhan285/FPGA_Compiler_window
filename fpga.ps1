@@ -16,7 +16,10 @@ param(
     [switch]$SkipChipDb,
     [switch]$SkipSetup,
     [switch]$DownloadFullToolchain,
+    [switch]$SkipDownload,
     [switch]$RequireFullBuildTools,
+    [switch]$FromRelease,
+    [string]$ReleaseTag = "toolchain-v1",
     [string]$Device = "xc7a100t",
     [string]$Part = "xc7a100tcsg324-1"
 )
@@ -159,18 +162,110 @@ function Get-GitHubReleaseAsset {
 function Expand-ArchiveToOpenXc7Root {
     param([string]$ArchivePath)
 
+    if (Test-Path -LiteralPath $OpenXc7Root) {
+        Write-Host "Toolchain already extracted. Skipping extraction."
+        return
+    }
+
     $ExtractRoot = Join-Path $ToolRoot "_openxc7_extract"
     if (Test-Path -LiteralPath $ExtractRoot) { Remove-Item -LiteralPath $ExtractRoot -Recurse -Force }
-    Expand-Archive -LiteralPath $ArchivePath -DestinationPath $ExtractRoot -Force
+    
+    $TarCommand = Get-Command "tar.exe" -ErrorAction SilentlyContinue
+    if ($TarCommand) {
+        Write-Host "Extracting with tar (fast)..."
+        & $TarCommand.Source -xf $ArchivePath -C $ToolRoot
+        if ($LASTEXITCODE -ne 0) { throw "tar extraction failed with code $LASTEXITCODE" }
+        $CandidateRoots = @(Get-ChildItem -Path $ToolRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "_openxc7_extract" } | Select-Object -ExpandProperty FullName)
+    } else {
+        Write-Host "Extracting (this may take several minutes)..."
+        Expand-Archive -LiteralPath $ArchivePath -DestinationPath $ExtractRoot -Force
+        $CandidateRoots = @($ExtractRoot) + @(Get-ChildItem -Path $ExtractRoot -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+    }
 
-    $CandidateRoots = @($ExtractRoot) + @(Get-ChildItem -Path $ExtractRoot -Directory -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
     $DetectedRoot = $CandidateRoots | Where-Object { Test-Path (Join-Path $_ "nextpnr-xilinx.exe") } | Select-Object -First 1
     if (-not $DetectedRoot) { throw "Downloaded bundle did not contain nextpnr-xilinx.exe." }
 
-    if (Test-Path -LiteralPath $OpenXc7Root) { Remove-Item -LiteralPath $OpenXc7Root -Recurse -Force }
-    New-Item -ItemType Directory -Force -Path $OpenXc7Root | Out-Null
-    Copy-Item -Path (Join-Path $DetectedRoot "*") -Destination $OpenXc7Root -Recurse -Force
-    Remove-Item -LiteralPath $ExtractRoot -Recurse -Force
+    if (-not (Test-Path -LiteralPath $OpenXc7Root)) {
+        New-Item -ItemType Directory -Force -Path $OpenXc7Root | Out-Null
+        Copy-Item -Path (Join-Path $DetectedRoot "*") -Destination $OpenXc7Root -Recurse -Force
+    }
+    
+    if (Test-Path -LiteralPath $ExtractRoot) { Remove-Item -LiteralPath $ExtractRoot -Recurse -Force }
+    Write-Host "Extraction done."
+}
+
+function Download-ReleaseArtifactsParallel {
+    param(
+        [string]$Owner,
+        [string]$Repo,
+        [string]$Tag,
+        [string[]]$AssetPatterns,
+        [string]$DestinationPath
+    )
+
+    $ApiUrl = "https://api.github.com/repos/$Owner/$Repo/releases/tags/$Tag"
+    Write-Host "Fetching release artifacts from $ApiUrl..."
+    $Release = Invoke-RestMethod -Uri $ApiUrl -Headers @{"Accept" = "application/vnd.github.v3+json"}
+    
+    $Assets = @()
+    foreach ($Pattern in $AssetPatterns) {
+        $Asset = $Release.assets | Where-Object { $_.name -like $Pattern } | Select-Object -First 1
+        if ($Asset) { $Assets += $Asset }
+    }
+
+    if ($Assets.Count -eq 0) {
+        throw "No release artifacts found matching patterns: $($AssetPatterns -join ', ')"
+    }
+
+    New-Item -ItemType Directory -Force -Path $DestinationPath | Out-Null
+
+    $Jobs = @()
+    foreach ($Asset in $Assets) {
+        $OutFile = Join-Path $DestinationPath $Asset.name
+        Write-Host "Starting download: $($Asset.name) ($('{0:N0}' -f ($Asset.size / 1MB)) MB)"
+        
+        $Job = Start-Job -ScriptBlock {
+            param($Url, $OutPath, $Name)
+            Write-Host "[Downloading] $Name..."
+            Invoke-WebRequest -Uri $Url -OutFile $OutPath -ErrorAction Stop
+            Write-Host "[Complete] $Name"
+        } -ArgumentList $Asset.browser_download_url, $OutFile, $Asset.name
+        
+        $Jobs += $Job
+    }
+
+    Write-Host "Downloading $($Assets.Count) artifacts in parallel..."
+    $Jobs | Wait-Job | Out-Null
+    
+    foreach ($Job in $Jobs) {
+        if ($Job.State -ne "Completed") {
+            Receive-Job $Job
+            throw "Download job failed: $($Job.Name)"
+        }
+        Receive-Job $Job
+    }
+
+    Write-Host "All downloads complete!"
+    return $Assets
+}
+
+function Merge-ArchiveParts {
+    param(
+        [string[]]$PartPaths,
+        [string]$OutputPath
+    )
+
+    Write-Host "Merging $($PartPaths.Count) archive parts..."
+    $Output = [System.IO.File]::Create($OutputPath)
+    
+    foreach ($Part in $PartPaths) {
+        $Input = [System.IO.File]::OpenRead($Part)
+        $Input.CopyTo($Output)
+        $Input.Close()
+    }
+    
+    $Output.Close()
+    Write-Host "Merged to: $OutputPath"
 }
 
 function Install-OpenXc7Bundle {
@@ -217,9 +312,20 @@ function Install-OpenXc7Bundle {
             }
         }
         $ArchivePath = Join-Path $ToolRoot $ArchiveName
-        Write-Host "Downloading openXC7 toolchain bundle: $BundleDownloadUrl"
-        Invoke-WebRequest -Uri $BundleDownloadUrl -OutFile $ArchivePath
-        Expand-ArchiveToOpenXc7Root -ArchivePath $ArchivePath
+        
+        if ($SkipDownload) {
+            Write-Host "(Skipping download due to -SkipDownload flag)"
+        } else {
+            if (-not (Test-Path -LiteralPath $ArchivePath)) {
+                Write-Host "Downloading openXC7 toolchain bundle: $BundleDownloadUrl"
+                Invoke-WebRequest -Uri $BundleDownloadUrl -OutFile $ArchivePath
+            }
+        }
+        
+        if (Test-Path -LiteralPath $ArchivePath) {
+            Expand-ArchiveToOpenXc7Root -ArchivePath $ArchivePath
+            Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
+        }
         return
     }
 
