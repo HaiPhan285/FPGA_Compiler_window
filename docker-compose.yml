@@ -1,13 +1,8 @@
-version: '3.8'
-
 services:
   fpga-compiler:
-    # Use pre-built image from Docker Hub (instant pull, no 10 min build!)
-    image: haiphan285/fpga-compiler:latest
-    # Or build locally if image not found:
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile
     volumes:
       - .:/workspace
     working_dir: /workspace

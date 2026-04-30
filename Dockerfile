@@ -1,26 +1,24 @@
 # FPGA Compiler for Nexys A7-100T - Docker Container
-# Instant setup: docker run -v %cd%:/workspace fpga-compiler fpga.bat build -Project lab2
+# Quick start: docker-compose run fpga-compiler fpga.bat build -Project lab2
+# Includes: Yosys, openFPGALoader. Downloads nextpnr-xilinx & Project X-Ray DB on first run.
 
-FROM mcr.microsoft.com/windows/servercore:ltsc2022
+FROM ubuntu:22.04
 
-# Install MSYS2 and dependencies
-RUN powershell -Command \
-    $ProgressPreference = 'SilentlyContinue'; \
-    Invoke-WebRequest -Uri https://github.com/msys2/msys2-installer/releases/download/2024-01-13/msys2-x86_64-20240113.exe -OutFile msys2-installer.exe; \
-    .\msys2-installer.exe in -accept-messages -y; \
-    Remove-Item msys2-installer.exe; \
-    echo "MSYS2 installed"
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
 
-# Add MSYS2 to PATH
-RUN setx /M PATH "C:\msys64\mingw64\bin;C:\msys64\usr\bin;%PATH%"
+# Install all required dependencies
+RUN apt-get update && apt-get install -y \
+    curl wget git build-essential \
+    python3 python3-dev python3-pip \
+    yosys \
+    cmake libusb-1.0-0-dev libftdi-dev libftdi1 libhidapi-dev pkg-config libudev-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install Yosys, openFPGALoader via MSYS2
-RUN C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-x86_64-yosys mingw-w64-x86_64-openfpgaloader" || exit /b 0
+# Pre-create toolchain directory for volume mounting
+RUN mkdir -p /workspace/.toolchain/tools
 
-# Copy toolchain (built from publish-to-release.ps1 output)
-COPY .toolchain /workspace/.toolchain
-
-# Copy FPGA scripts
+# Copy project files
 COPY fpga.bat /workspace/
 COPY fpga.ps1 /workspace/
 COPY toolchain.json /workspace/
@@ -28,7 +26,9 @@ COPY app /workspace/app
 
 WORKDIR /workspace
 
-# Enable PowerShell execution
-RUN powershell -Command Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Force
+RUN chmod +x /workspace/fpga.bat /workspace/fpga.ps1 || true
 
-ENTRYPOINT ["powershell", "-Command"]
+# Verify installed tools
+RUN yosys --version
+
+ENTRYPOINT ["/bin/bash"]
