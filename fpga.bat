@@ -1,6 +1,2 @@
 @echo off
-setlocal
-
-set "SCRIPT_DIR=%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%fpga.ps1" %*
-exit /b %ERRORLEVEL%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0fpga.ps1" %*

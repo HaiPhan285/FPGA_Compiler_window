@@ -25,8 +25,20 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptPath = $MyInvocation.MyCommand.Path
-$RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ScriptPath = if ($PSCommandPath) {
+    $PSCommandPath
+} elseif ($MyInvocation.MyCommand.Path) {
+    $MyInvocation.MyCommand.Path
+} else {
+    Join-Path (Get-Location).Path "fpga.ps1"
+}
+$RepoRoot = if ($PSScriptRoot) {
+    $PSScriptRoot
+} elseif ($ScriptPath) {
+    Split-Path -Parent $ScriptPath
+} else {
+    (Get-Location).Path
+}
 
 # Cross-platform path handling
 $RunningOnWindows = $PSVersionTable.Platform -eq "Win32NT" -or $PSVersionTable.PSVersion.Major -lt 6
@@ -44,14 +56,22 @@ if ($RunningOnWindows) {
     $UsrBin = Join-Path $MsysRoot "usr\bin"
 } else {
     $PathSeparator = "/"
-    $ToolRoot = Join-Path $RepoRoot ".toolchain/tools"
-    $ToolBin = Join-Path $ToolRoot "bin"
     $BuildRoot = Join-Path $RepoRoot "build"
     $ConfigPath = Join-Path $RepoRoot "toolchain.json"
-    $OpenXc7Root = Join-Path $ToolRoot "openxc7"
     $MsysRoot = ""
     $MingwBin = ""
     $UsrBin = "/usr/bin"
+    
+    # Check if we are inside the self-contained Docker container
+    if (Test-Path "/opt/fpga/oss-cad-suite") {
+        $ToolRoot = "/opt/fpga"
+        $ToolBin = "/opt/fpga/oss-cad-suite/bin"
+        $OpenXc7Root = "/opt/fpga/oss-cad-suite"
+    } else {
+        $ToolRoot = Join-Path $RepoRoot ".toolchain/tools"
+        $ToolBin = Join-Path $ToolRoot "bin"
+        $OpenXc7Root = Join-Path $ToolRoot "openxc7"
+    }
 }
 $AppRoot = Join-Path $RepoRoot "app"
 
@@ -696,14 +716,20 @@ function Invoke-Checked {
 function Find-ChipDb {
     param([string]$DeviceName)
     $Candidates = @(
-        (Join-Path $ToolBin "..\share\nextpnr\xilinx\chipdb-$DeviceName.bin"),
-        (Join-Path $RepoRoot ".toolchain\tools\share\nextpnr\xilinx\chipdb-$DeviceName.bin"),
-        (Join-Path $OpenXc7Root "share\nextpnr\xilinx\chipdb-$DeviceName.bin"),
-        (Join-Path $OpenXc7Root "tools\chipdb-$DeviceName.bin"),
-        (Join-Path $OpenXc7Root "tools\$DeviceName.bin"),
-        "C:\msys64\mingw64\share\nextpnr\xilinx\chipdb-$DeviceName.bin",
-        (Join-Path $env:LOCALAPPDATA "nextpnr\xilinx\chipdb-$DeviceName.bin")
+        (Join-PathCrossPlatform $ToolBin "..\share\nextpnr\xilinx\chipdb-$DeviceName.bin"),
+        (Join-PathCrossPlatform $RepoRoot ".toolchain\tools\share\nextpnr\xilinx\chipdb-$DeviceName.bin"),
+        (Join-PathCrossPlatform $OpenXc7Root "share\nextpnr\xilinx\chipdb-$DeviceName.bin"),
+        (Join-PathCrossPlatform $OpenXc7Root "tools\chipdb-$DeviceName.bin"),
+        (Join-PathCrossPlatform $OpenXc7Root "tools\$DeviceName.bin"),
+        "/usr/local/share/nextpnr/xilinx/chipdb-$DeviceName.bin",
+        "/opt/fpga/nextpnr-xilinx/share/nextpnr/xilinx/chipdb-$DeviceName.bin"
     )
+    if ($RunningOnWindows) {
+        $Candidates += "C:\msys64\mingw64\share\nextpnr\xilinx\chipdb-$DeviceName.bin"
+        if ($env:LOCALAPPDATA) {
+            $Candidates += (Join-Path $env:LOCALAPPDATA "nextpnr\xilinx\chipdb-$DeviceName.bin")
+        }
+    }
     foreach ($Candidate in $Candidates) {
         $Resolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Candidate)
         if (Test-Path $Resolved) { return $Resolved }
@@ -714,6 +740,7 @@ function Find-ChipDb {
 function Find-PrjxrayDb {
     $Candidates = @(
         $env:PRJXRAY_DB_DIR,
+        "/opt/fpga/prjxray-db",
         (Join-Path $RepoRoot ".toolchain\prjxray-db"),
         (Join-Path $OpenXc7Root "src\prjxray-db"),
         (Join-Path $RepoRoot "_openxc7_src\prjxray-db"),
