@@ -8,5 +8,7 @@ services:
     working_dir: /workspace
     stdin_open: true
     tty: true
-    entrypoint: /usr/bin/pwsh -NoProfile -ExecutionPolicy Bypass
-    # Usage: docker-compose run fpga-compiler -File scripts/fpga.ps1 build -Project lab2
+    privileged: true
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    # Usage: docker-compose run fpga-compiler fpga.bat build -Project lab2

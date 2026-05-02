@@ -26,11 +26,21 @@ ENV PYTHONPATH="/opt/fpga/prjxray:/opt/fpga/prjxray/third_party/fasm:${PYTHONPAT
 
 # Clone Project X-Ray DB and Tools (recursive for submodules)
 RUN git clone --depth 1 https://github.com/f4pga/prjxray-db.git /opt/fpga/prjxray-db && \
-    git clone --recursive https://github.com/f4pga/prjxray.git /opt/fpga/prjxray
+    git clone --recursive https://github.com/f4pga/prjxray.git /opt/fpga/prjxray && \
+    pip3 install \
+        textx \
+        PyYAML \
+        simplejson \
+        intervaltree \
+        antlr4-python3-runtime==4.9.2 \
+        fpdf2 \
+        ply && \
+    pip3 install /opt/fpga/prjxray && \
+    pip3 install /opt/fpga/prjxray/third_party/fasm
 
 # Build Project X-Ray tools (xc7frames2bit etc)
 RUN cd /opt/fpga/prjxray && \
-    mkdir build && cd build && \
+    mkdir -p build && cd build && \
     cmake -DCMAKE_INSTALL_PREFIX=/usr/local .. && \
     make -j$(nproc) && \
     make install && \
@@ -59,6 +69,6 @@ RUN cd /opt/fpga/nextpnr-xilinx/xilinx/python && \
 WORKDIR /workspace
 COPY . /workspace
 
-RUN chmod +x /workspace/fpga.ps1 || true
+RUN chmod +x /workspace/fpga.ps1 /workspace/entrypoint.sh || true
 
-ENTRYPOINT ["/usr/bin/pwsh"]
+ENTRYPOINT ["/workspace/entrypoint.sh"]
