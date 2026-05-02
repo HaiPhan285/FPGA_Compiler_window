@@ -5,6 +5,10 @@ tools-cache/*.exe filter=lfs diff=lfs merge=lfs -text
 *.bit binary
 *.bin binary
 
+# Shell scripts (must use LF for Unix compatibility)
+*.sh text eol=lf
+*.bash text eol=lf
+
 # Verilog and HDL source files (text)
 *.v text eol=lf
 *.xdc text eol=lf
