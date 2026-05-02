@@ -13,11 +13,18 @@ git clone https://github.com/HaiPhan285/FPGA_Compiler_window.git
 cd FPGA_Compiler_window
 ```
 
-### 2. Build the Docker Image
-*Required once. Takes ~5 minutes.*
+### 2. Pull the Docker Image (Fast) or Build (Slow)
+*Pull pre-built image (~30 seconds):*
+```powershell
+docker-compose pull
+```
+
+*Or build locally if pull fails (~5 minutes):*
 ```powershell
 docker-compose build
 ```
+
+**Note:** The image is hosted at `haiphanthanh10272005/fpga-compiler` on Docker Hub.
 
 ### 3. Build a Project
 ```powershell
@@ -73,13 +80,15 @@ Now run the flash command from Quick Start.
 | Step | Time |
 |------|------|
 | Clone repo | 1 min |
-| Docker image build | 5 min |
+| **Docker image pull** | **30 sec** |
 | **USB Setup (One-time)** | **2 min** |
 | Build project | 2 min |
 | Flash to board | 30 sec |
-| **TOTAL FIRST TIME** | **~10 min** |
+| **TOTAL FIRST TIME** | **~4 min** |
 
 *Note: Subsequent builds take only ~2 minutes. No Ubuntu installation required.*
+
+**Alternative: Build locally (~5 min instead of pull) if Docker Hub is unavailable.*
 
 ---
 
@@ -114,6 +123,8 @@ FPGA_Compiler_window/
 ---
 
 ## 🎓 Create Your Own Project
+
+**Prerequisite:** Complete the [Quick Start](#-quick-start) steps first (including `docker-compose pull`) to set up the Docker environment.
 
 ### Step 1: Create Project Folder
 ```powershell
