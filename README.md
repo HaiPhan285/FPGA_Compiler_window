@@ -1,74 +1,114 @@
+# FPGA Compiler for Windows (Docker)
 
-# FPGA Compiler for Native Windows
-
-Open-source build flow for **Digilent Nexys A7-100T** on Windows without Vivado and without WSL.
+Open-source build flow for **Digilent Nexys A7-100T** on Windows.
+No Vivado, no WSL, no messy toolchains. **Just Docker.**
 
 ---
 
-## 🚀 Quick Start (3 Commands)
+## 🚀 Quick Start
 
-**Friend's exact commands (copy & paste):**
-
+### 1. Clone and Enter
 ```powershell
 git clone https://github.com/HaiPhan285/FPGA_Compiler_window.git
 cd FPGA_Compiler_window
-docker-compose run fpga-compiler fpga.bat build -Project lab2
-docker-compose run fpga-compiler fpga.bat flash -Project lab2
 ```
 
-**Requirements:** Docker Desktop installed  
-**Time:** ~5-6 minutes (first time) ⚡⚡⚡⚡⚡
+### 2. Build the Docker Image
+*Required once. Takes ~5 minutes.*
+```powershell
+docker-compose build
+```
+
+### 3. Build a Project
+```powershell
+docker-compose run fpga-compiler fpga.ps1 build -Project seven_segment
+```
+
+### 4. Flash to Board
+*Note: Requires USB setup (see section below)*
+```powershell
+docker-compose run fpga-compiler fpga.ps1 flash -Project seven_segment
+```
 
 ---
 
-## ⏱️ Timeline for Friends
+## 🔌 USB Setup for Flashing (Required for Windows)
+
+Because the build environment runs inside a Docker container, you must explicitly pass the USB connection from Windows to the container to flash the board.
+
+**1. Install usbipd-win**
+Open PowerShell as Administrator:
+```powershell
+winget install dorssel.usbipd-win
+```
+*Restart your terminal after installation.*
+
+**2. Connect the Board**
+Plug in your Nexys A7 via USB.
+
+**3. Bind the Device**
+Find the "Digilent" device and note its `BUSID`:
+```powershell
+usbipd list
+# Example: 2-2    0403:6010    Digilent USB Device
+```
+Bind the device (replace `<BUSID>` with your actual ID, e.g., `2-2`):
+```powershell
+usbipd bind -b <BUSID>
+```
+
+**4. Attach to WSL**
+Run this command whenever you plug the board in:
+```powershell
+usbipd attach --wsl -b <BUSID>
+```
+
+**5. Flash**
+Now run the flash command from Quick Start.
+
+---
+
+## ⏱️ Timeline for New Users
 
 | Step | Time |
 |------|------|
 | Clone repo | 1 min |
-| Docker image pulls | 2 min |
+| Docker image build | 5 min |
+| **USB Setup (One-time)** | **2 min** |
 | Build project | 2 min |
 | Flash to board | 30 sec |
-| **TOTAL FIRST TIME** | **~5-6 min** ⚡⚡⚡⚡⚡ |
-| **TOTAL NEXT BUILD** | **~2.5 min** ⚡⚡⚡⚡⚡ |
+| **TOTAL FIRST TIME** | **~10 min** |
 
-No setup needed! Image auto-pulls from Docker Hub!
+*Note: Subsequent builds take only ~2 minutes. No Ubuntu installation required.*
 
 ---
 
-## 📋 Commands Reference (Docker)
+## 📋 Commands Reference
 
-| Command | What it does | Time |
-|---------|-------------|------|
-| `docker-compose run fpga-compiler fpga.bat build -Project lab2` | Build a project | 2 min |
-| `docker-compose run fpga-compiler fpga.bat flash -Project lab2` | Flash to board | 30 sec |
-| `docker-compose run fpga-compiler fpga.bat list` | List all projects | 1 sec |
+| Command | Description |
+|---------|-------------|
+| `docker-compose build` | Build the Docker image (First time only) |
+| `docker-compose run fpga-compiler fpga.ps1 build -Project <name>` | Build a project |
+| `docker-compose run fpga-compiler fpga.ps1 flash -Project <name>` | Flash to board |
+| `docker-compose run fpga-compiler fpga.ps1 list` | List available projects |
 
 ## 📁 Project Structure
 
 ```
 FPGA_Compiler_window/
-├── fpga.bat                 # Windows launcher
-├── fpga.ps1                 # Main script
-├── publish-to-release.ps1   # Tool for publishing to GitHub Release
-├── README.md                # This file
-├── toolchain.json           # Configuration
+├── Dockerfile              # Docker environment definition
+├── docker-compose.yml      # Docker configuration
+├── fpga.ps1                # Main script
+├── README.md               # This file
 │
-├── app/                     # Your projects
-│   ├── lab/                (prebuilt example)
-│   └── lab2/               (build from source)
-│       ├── top.v
-│       └── constraints.xdc
+├── app/                    # Your projects
+│   ├── lab/
+│   └── seven_segment/      # Example project
 │
-├── build/                   # Build outputs
-│   └── lab2/
-│       ├── lab2.json
-│       ├── lab2.fasm
-│       ├── lab2.bit
-│       └── lab2.log
-│
-└── .toolchain/              # Cached tools
-    └── tools\openxc7\
+├── build/                  # Build outputs (created after build)
+│   └── seven_segment/
+│       ├── seven_segment.bit
+│       └── ...
 ```
 
 ---
@@ -76,26 +116,22 @@ FPGA_Compiler_window/
 ## 🎓 Create Your Own Project
 
 ### Step 1: Create Project Folder
-
 ```powershell
 mkdir app\my_design
 ```
 
 ### Step 2: Add Verilog File (`top.v`)
-
 Create `app\my_design\top.v`:
 ```verilog
 module top (
     input clk,
     output led
 );
-    // Your design here
-    assign led = clk;  // Example
+    assign led = clk;
 endmodule
 ```
 
 ### Step 3: Add Constraints File (`constraints.xdc`)
-
 Create `app\my_design\constraints.xdc`:
 ```tcl
 set_property -dict {PACKAGE_PIN E3 IOSTANDARD LVCMOS33} [get_ports {clk}]
@@ -103,81 +139,38 @@ set_property -dict {PACKAGE_PIN H17 IOSTANDARD LVCMOS33} [get_ports {led}]
 ```
 
 ### Step 4: Build & Flash
-
 ```powershell
-docker-compose run fpga-compiler fpga.bat build -Project my_design
-docker-compose run fpga-compiler fpga.bat flash -Project my_design
-```
-
----
-
-## 🔄 Adding More Projects
-
-Once you have the repo cloned, add new projects anytime:
-
-```powershell
-# 1. Create project folder
-mkdir app\their_project
-
-# 2. Add top.v and constraints.xdc
-
-# 3. Build with Docker
-docker-compose run fpga-compiler fpga.bat build -Project their_project
-
-# 4. Flash to board
-docker-compose run fpga-compiler fpga.bat flash -Project their_project
-```
-
-List all projects:
-```powershell
-docker-compose run fpga-compiler fpga.bat list
+docker-compose run fpga-compiler fpga.ps1 build -Project my_design
+docker-compose run fpga-compiler fpga.ps1 flash -Project my_design
 ```
 
 ---
 
 ## ❌ Troubleshooting
 
-### Docker not installed
-- Download: https://www.docker.com/products/docker-desktop
-- Install and restart
+### "unable to open ftdi device" during flash
+- Ensure **usbipd** is installed.
+- Run `usbipd list` to check the device state.
+- Run `usbipd attach --wsl -b <BUSID>` again.
 
-### "Image pull failed" / "No image found"
-```powershell
-# Build the image locally (one-time, 10 min)
-docker build -t fpga-compiler .
+### Docker build fails
+- Ensure Docker Desktop is running.
+- Check your internet connection (downloads OSS CAD Suite).
 
-# Then retry
-docker-compose run fpga-compiler fpga.bat build -Project lab2
-```
-
-### Build fails / "module not found"
-- Check `app/lab2/top.v` syntax
-- Module name must be `top`
-- Check constraints file: `app/lab2/constraints.xdc`
-
-### ".bit generation failed"
-- Check Verilog syntax errors
-- Module name must be `top`
-- Check log file: `build/lab2/lab2.log`
+### "Module not found" or "Syntax Error"
+- Check `top.v` for syntax errors.
+- Ensure the top module is named `top` or specified correctly.
 
 ---
 
-## 🔧 Tools Used
-
-- **Yosys** - Synthesis (Verilog → JSON)
-- **nextpnr-xilinx** - Place & Route (JSON → FASM)
-- **fasm2frames** - Frame generation (FASM → Frames)
-- **xc7frames2bit** - Bitstream (Frames → BIT)
-- **openFPGALoader** - Flashing to board
-- **MSYS2** - Package manager for Yosys/openFPGALoader
-
----
+## 🔧 Tools Used (Inside Docker)
+- **Yosys** - Synthesis
+- **nextpnr-xilinx** - Place & Route
+- **Project X-Ray** - Bitstream generation
+- **openFPGALoader** - Flashing
 
 ## 📚 References
-
 - [Yosys](https://github.com/YosysHQ/yosys)
 - [nextpnr-xilinx](https://github.com/openXC7/nextpnr-xilinx)
-- [Project X-Ray](https://github.com/openXC7/prjxray)
 - [openFPGALoader](https://github.com/trabucayre/openFPGALoader)
-- [Nexys A7-100T Manual](https://digilent.com/reference/programmable-logic/nexys-a7/reference-manual)
-
+- [usbipd-win](https://github.com/dorssel/usbipd-win)
