@@ -70,5 +70,7 @@ WORKDIR /workspace
 COPY . /workspace
 
 RUN chmod +x /workspace/fpga.ps1 /workspace/entrypoint.sh || true
+# Generate toolchain env file at build time so containers skip runtime setup
+RUN pwsh -NoProfile -ExecutionPolicy Bypass -Command ". /workspace/fpga.ps1; Write-ToolchainEnv" || true
 
 ENTRYPOINT ["/workspace/entrypoint.sh"]
