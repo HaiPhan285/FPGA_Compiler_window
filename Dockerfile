@@ -20,7 +20,7 @@ RUN set -eux; \
     find /opt/fpga/oss-cad-suite -name "__pycache__" -type d -exec rm -rf {} + || true
 
 # Final: minimal runtime
-FROM ubuntu:22.04-slim
+FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
