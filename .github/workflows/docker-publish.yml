@@ -12,6 +12,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      OWNER: ${{ toLower(github.repository_owner) }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,5 +38,5 @@ jobs:
           context: .
           file: Dockerfile
           push: true
-          tags: ghcr.io/HaiPhan285/fpga-compiler:latest
-          cache-from: type=registry,ref=ghcr.io/HaiPhan285/fpga-compiler:latest
+          tags: ghcr.io/${{ env.OWNER }}/fpga-compiler:latest
+          cache-from: type=registry,ref=ghcr.io/${{ env.OWNER }}/fpga-compiler:latest
